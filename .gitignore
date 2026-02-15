@@ -28,5 +28,12 @@ go.work.sum
 .env
 
 # Editor/IDE
-# .idea/
-# .vscode/
+.idea/
+.vscode/
+
+# Project-specific
+pkg/protos/*.pb.go         # Generated protobuf code (regenerate from .proto)
+docker-compose.override.yml
+*.env
+*.db
+benchmark_results/
