@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package benchmark;
 
-option go_package = "github.com/tsmereka/grpc-rest-benchmark/pkg/protos";
+option go_package = "github.com/kaldun-tech/grpc-rest-benchmark/pkg/protos";
 
 // ============================================================================
 // Scenario 1: Balance Service
