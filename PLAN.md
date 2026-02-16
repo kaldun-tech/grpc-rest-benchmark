@@ -5,11 +5,71 @@
 | Phase | Status | Description |
 |-------|--------|-------------|
 | Infrastructure | **COMPLETE** | Schema, proto, seed data, Docker, Makefile |
-| Go Dependencies | NOT STARTED | Add grpc, protobuf, pgx to go.mod |
-| Database Client | NOT STARTED | pkg/db/ connection and queries |
-| gRPC Server | NOT STARTED | cmd/grpc-server/ |
-| REST Server | NOT STARTED | cmd/rest-server/ |
+| Go Dependencies | **COMPLETE** | grpc, protobuf, pgx in go.mod |
+| Database Client | **COMPLETE** | pkg/db/ with all queries |
+| gRPC Server | **COMPLETE** | cmd/grpc-server/ on :50051 |
+| REST Server | **COMPLETE** | cmd/rest-server/ on :8080 |
 | Benchmark Runner | NOT STARTED | cmd/benchmark/ |
+
+---
+
+## Code Review (Tomorrow Morning)
+
+**Uncommitted files to review:**
+
+1. **`pkg/db/db.go`** - Connection pool setup, config struct
+2. **`pkg/db/accounts.go`** - `GetBalance()`, `GetBalances()`, `GetRandomAccountID()`
+3. **`pkg/db/transactions.go`** - `StreamTransactions()` with channel-based streaming
+4. **`pkg/db/benchmark.go`** - `RecordRun()`, `RecordSample()`, `GetStats()`
+5. **`cmd/grpc-server/main.go`** - gRPC server with BalanceService, TransactionService
+6. **`cmd/rest-server/main.go`** - REST server with SSE streaming
+7. **`Makefile`** - Added `grpc-server`, `rest-server` targets
+
+**Review checklist:**
+- [ ] DB connection handling and error wrapping
+- [ ] gRPC service implementations match proto definitions
+- [ ] REST endpoints match spec (`/api/v1/accounts/{id}/balance`, etc.)
+- [ ] SSE streaming format correct (`event: transaction\ndata: {...}\n\n`)
+- [ ] Rate limiting logic in both streaming implementations
+- [ ] Graceful shutdown handling
+
+**Quick test after review:**
+```bash
+# Terminal 1: Start database and seed
+make db-up && make seed
+
+# Terminal 2: Start gRPC server
+make grpc-server
+
+# Terminal 3: Start REST server
+make rest-server
+
+# Terminal 4: Test endpoints
+curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/accounts/0.0.100000/balance
+grpcurl -plaintext localhost:50051 list
+```
+
+---
+
+## Next Step: Benchmark Runner
+
+After code review, implement `cmd/benchmark/main.go`:
+
+```bash
+# Target CLI interface
+./benchmark --scenario=balance --protocol=grpc --concurrency=50 --duration=60s
+./benchmark --scenario=stream --protocol=rest --rate=100 --duration=60s
+```
+
+**Key components:**
+- CLI flag parsing (scenario, protocol, concurrency, duration, rate)
+- gRPC client with connection reuse
+- HTTP client with keep-alive
+- Concurrent worker pool for load generation
+- Latency measurement (time.Now → response received)
+- Results storage via `pkg/db/benchmark.go`
+- Console summary output
 
 ---
 
@@ -17,9 +77,14 @@
 
 - `migrations/001_init.sql` - Full schema with accounts, transactions, benchmark results, stats view
 - `pkg/protos/benchmark.proto` - BalanceService, TransactionService, Health definitions
+- `pkg/protos/benchmark.pb.go` - Generated message types
+- `pkg/protos/benchmark_grpc.pb.go` - Generated service interfaces
 - `scripts/seed_data.sql` - 10K accounts, 100K transactions with realistic distribution
 - `docker-compose.yml` - PostgreSQL 16 with health checks
-- `Makefile` - proto, seed, benchmark, clean targets
+- `Makefile` - proto, seed, benchmark, grpc-server, rest-server, clean targets
+- `pkg/db/*.go` - Database client layer
+- `cmd/grpc-server/main.go` - gRPC server implementation
+- `cmd/rest-server/main.go` - REST server implementation
 
 ---
 

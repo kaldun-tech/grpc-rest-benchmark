@@ -1,3 +1,6 @@
+-- Clear existing data for idempotent re-runs
+TRUNCATE accounts, transactions, benchmark_samples, benchmark_runs CASCADE;
+
 -- Seed 10,000 accounts with random balances
 INSERT INTO accounts (account_id, balance_tinybar, updated_at)
 SELECT
@@ -21,7 +24,7 @@ WITH tx_data AS (
 )
 INSERT INTO transactions (tx_id, from_account, to_account, amount_tinybar, tx_type, timestamp)
 SELECT
-    '0.0.' || (100000 + (id % 10000)) || '@' || EXTRACT(EPOCH FROM tx_time)::BIGINT,
+    '0.0.' || (100000 + (id % 10000)) || '@' || EXTRACT(EPOCH FROM tx_time)::BIGINT || '.' || id,
     '0.0.' || (100000 + (RANDOM() * 10000)::INT),
     '0.0.' || (100000 + (RANDOM() * 10000)::INT),
     amount,
