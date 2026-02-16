@@ -1,7 +1,20 @@
 {
   "permissions": {
     "allow": [
-      "Bash(go mod init:*)"
+      "Bash(go mod init:*)",
+      "Bash(make proto:*)",
+      "Bash(sudo apt-get update:*)",
+      "Bash(sudo apt-get install:*)",
+      "Bash(protoc --version:*)",
+      "Bash(go install:*)",
+      "Bash(source:*)",
+      "Bash(go env:*)",
+      "Bash(export GOPATH=\"$HOME/go\")",
+      "Bash(export GOMODCACHE=\"$HOME/go/pkg/mod\")",
+      "Bash(export PATH=\"$HOME/go/bin:$PATH\")",
+      "Bash(go get:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go build:*)"
     ]
   }
 }
