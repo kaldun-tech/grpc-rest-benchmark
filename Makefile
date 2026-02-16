@@ -1,4 +1,4 @@
-.PHONY: proto seed benchmark clean db-up db-down
+.PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -20,6 +20,22 @@ db-down:
 # Seed database with test data (10k accounts, 100k transactions)
 seed: db-up
 	docker-compose exec -T postgres psql -U benchmark -d grpc_benchmark < scripts/seed_data.sql
+
+# Run gRPC server (port 50051)
+grpc-server: db-up
+	go run cmd/grpc-server/main.go
+
+# Run REST server (port 8080)
+rest-server: db-up
+	go run cmd/rest-server/main.go
+
+# Run both servers (in background) - use 'make db-down' to stop
+servers: db-up
+	@echo "Starting gRPC server on :50051..."
+	@go run cmd/grpc-server/main.go &
+	@echo "Starting REST server on :8080..."
+	@go run cmd/rest-server/main.go &
+	@echo "Both servers running. Use 'pkill -f cmd/..-server' to stop."
 
 # Run benchmarks
 benchmark:
