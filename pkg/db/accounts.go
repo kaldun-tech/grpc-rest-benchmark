@@ -87,3 +87,28 @@ func (db *DB) GetAccountCount(ctx context.Context) (int64, error) {
 	}
 	return count, nil
 }
+
+// GetAllAccountIDs returns all account IDs from the database.
+// Used to pre-load account IDs for benchmarking.
+func (db *DB) GetAllAccountIDs(ctx context.Context) ([]string, error) {
+	rows, err := db.Pool.Query(ctx, `SELECT account_id FROM accounts`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query account IDs: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("failed to scan account ID: %w", err)
+		}
+		ids = append(ids, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating account IDs: %w", err)
+	}
+
+	return ids, nil
+}

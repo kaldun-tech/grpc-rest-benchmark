@@ -1,4 +1,5 @@
-.PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers
+.PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers \
+        benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -37,9 +38,22 @@ servers: db-up
 	@go run cmd/rest-server/main.go &
 	@echo "Both servers running. Use 'pkill -f cmd/..-server' to stop."
 
-# Run benchmarks
+# Run benchmarks (use ARGS to pass flags, e.g.: make benchmark ARGS="--scenario=balance --protocol=grpc")
 benchmark:
-	go run cmd/benchmark/main.go
+	go run cmd/benchmark/*.go $(ARGS)
+
+# Quick benchmark examples
+benchmark-balance-grpc:
+	go run cmd/benchmark/*.go --scenario=balance --protocol=grpc --duration=10s --concurrency=10
+
+benchmark-balance-rest:
+	go run cmd/benchmark/*.go --scenario=balance --protocol=rest --duration=10s --concurrency=10
+
+benchmark-stream-grpc:
+	go run cmd/benchmark/*.go --scenario=stream --protocol=grpc --duration=10s --rate=100
+
+benchmark-stream-rest:
+	go run cmd/benchmark/*.go --scenario=stream --protocol=rest --duration=10s --rate=100
 
 # Clean up: stop containers, remove volumes, delete generated code
 clean:

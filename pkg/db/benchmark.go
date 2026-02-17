@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // BenchmarkRun represents a benchmark run record.
@@ -75,32 +77,37 @@ func (db *DB) RecordSample(ctx context.Context, sample *BenchmarkSample) error {
 	return nil
 }
 
-// RecordSamples records multiple latency samples in a batch.
+// RecordSamples records multiple latency samples using PostgreSQL COPY protocol.
 func (db *DB) RecordSamples(ctx context.Context, samples []*BenchmarkSample) error {
 	if len(samples) == 0 {
 		return nil
 	}
 
-	// Use a transaction for batch insert
-	tx, err := db.Pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-	defer tx.Rollback(ctx)
-
-	for _, sample := range samples {
-		_, err := tx.Exec(ctx,
-			`INSERT INTO benchmark_samples (run_id, latency_ms, success, error_type, timestamp)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			sample.RunID, sample.LatencyMs, sample.Success, sample.ErrorType, sample.Timestamp,
-		)
-		if err != nil {
-			return fmt.Errorf("failed to record benchmark sample: %w", err)
+	// Build rows for COPY
+	rows := make([][]interface{}, len(samples))
+	for i, sample := range samples {
+		rows[i] = []interface{}{
+			sample.RunID,
+			sample.LatencyMs,
+			sample.Success,
+			sample.ErrorType,
+			sample.Timestamp,
 		}
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("failed to commit samples: %w", err)
+	// Use COPY protocol for fast bulk insert
+	copied, err := db.Pool.CopyFrom(
+		ctx,
+		pgx.Identifier{"benchmark_samples"},
+		[]string{"run_id", "latency_ms", "success", "error_type", "timestamp"},
+		pgx.CopyFromRows(rows),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to copy samples: %w", err)
+	}
+
+	if copied != int64(len(samples)) {
+		return fmt.Errorf("expected to copy %d rows, copied %d", len(samples), copied)
 	}
 
 	return nil

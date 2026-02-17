@@ -7,7 +7,12 @@
 ## Database Patterns (pgx)
 
 4. Rows objects returned by `db.Pool.Query` can be iterated with `for rows.Next()`. Use `defer rows.Close()` immediately after the Query call.
-5. For batch inserts, wrap in a transaction: `tx.Begin()`, loop with `tx.Exec()`, then `tx.Commit()`. Use `defer tx.Rollback(ctx)` which is a no-op after commit.
+5. For bulk inserts, **use PostgreSQL's COPY protocol** (`pgx.CopyFrom`), not individual INSERTs in a loop. Even inside a transaction, 68K individual INSERTs took ~60 seconds vs <1 second with COPY. The difference is round-trips: COPY streams all rows in a single operation.
+   ```go
+   rows := make([][]interface{}, len(samples))
+   for i, s := range samples { rows[i] = []interface{}{s.Field1, s.Field2} }
+   db.Pool.CopyFrom(ctx, pgx.Identifier{"table"}, []string{"col1", "col2"}, pgx.CopyFromRows(rows))
+   ```
 6. `ORDER BY RANDOM() LIMIT 1` is simple but slow on large tables. Fine for 10K rows, doesn't scale to millions.
 
 ## Streaming Patterns

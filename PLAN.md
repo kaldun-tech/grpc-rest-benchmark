@@ -9,7 +9,7 @@
 | Database Client | **COMPLETE** | pkg/db/ with all queries |
 | gRPC Server | **COMPLETE** | cmd/grpc-server/ on :50051 |
 | REST Server | **COMPLETE** | cmd/rest-server/ on :8080 |
-| Benchmark Runner | NOT STARTED | cmd/benchmark/ |
+| Benchmark Runner | **COMPLETE** | cmd/benchmark/ with balance & stream scenarios |
 
 ---
 
