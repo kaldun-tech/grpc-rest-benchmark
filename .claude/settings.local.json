@@ -19,7 +19,9 @@
       "Bash(docker-compose ps:*)",
       "Bash(make benchmark-balance-rest:*)",
       "Bash(./bin/benchmark:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(docker-compose up:*)",
+      "Bash(make seed:*)"
     ]
   }
 }

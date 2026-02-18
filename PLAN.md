@@ -15,7 +15,9 @@ Phase 1 results:
 - Streaming: performance parity between SSE and gRPC streaming
 - Both protocols hit DB connection pool saturation around 10K req/s
 
-**Phase 2 not yet started.** Multi-language clients planned next.
+**Phase 2a is complete.** Python gRPC client implemented. Migration 002 applied (adds `client` column to track language/client type).
+
+**Next up:** Phase 2b — Python Hedera SDK client for SDK overhead comparison.
 
 ---
 
