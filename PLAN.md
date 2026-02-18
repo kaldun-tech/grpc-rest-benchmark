@@ -1,260 +1,181 @@
-# Project Plan: gRPC vs REST Benchmark
+# gRPC vs REST Benchmark — Project Plan
 
-## Progress Summary
+## What This Is
 
-| Phase | Status | Description |
-|-------|--------|-------------|
-| Infrastructure | **COMPLETE** | Schema, proto, seed data, Docker, Makefile |
-| Go Dependencies | **COMPLETE** | grpc, protobuf, pgx in go.mod |
-| Database Client | **COMPLETE** | pkg/db/ with all queries |
-| gRPC Server | **COMPLETE** | cmd/grpc-server/ on :50051 |
-| REST Server | **COMPLETE** | cmd/rest-server/ on :8080 |
-| Benchmark Runner | **COMPLETE** | cmd/benchmark/ with balance & stream scenarios |
+A benchmarking tool comparing gRPC and REST performance across two scenarios relevant to financial/blockchain infrastructure. Go servers are complete. Phase 2 adds multi-language clients (Python, Rust) against the same servers to measure SDK abstraction overhead vs raw transport.
 
 ---
 
-## Code Review (Tomorrow Morning)
+## Current State
 
-**Uncommitted files to review:**
+**Phase 1 is complete.** Both servers are running, the benchmark CLI works, and results are persisted to PostgreSQL.
 
-1. **`pkg/db/db.go`** - Connection pool setup, config struct
-2. **`pkg/db/accounts.go`** - `GetBalance()`, `GetBalances()`, `GetRandomAccountID()`
-3. **`pkg/db/transactions.go`** - `StreamTransactions()` with channel-based streaming
-4. **`pkg/db/benchmark.go`** - `RecordRun()`, `RecordSample()`, `GetStats()`
-5. **`cmd/grpc-server/main.go`** - gRPC server with BalanceService, TransactionService
-6. **`cmd/rest-server/main.go`** - REST server with SSE streaming
-7. **`Makefile`** - Added `grpc-server`, `rest-server` targets
+Phase 1 results:
+- High concurrency (50+): gRPC wins ~17-18% throughput, 15-22% better p99 latency
+- Streaming: performance parity between SSE and gRPC streaming
+- Both protocols hit DB connection pool saturation around 10K req/s
 
-**Review checklist:**
-- [ ] DB connection handling and error wrapping
-- [ ] gRPC service implementations match proto definitions
-- [ ] REST endpoints match spec (`/api/v1/accounts/{id}/balance`, etc.)
-- [ ] SSE streaming format correct (`event: transaction\ndata: {...}\n\n`)
-- [ ] Rate limiting logic in both streaming implementations
-- [ ] Graceful shutdown handling
+**Phase 2 not yet started.** Multi-language clients planned next.
 
-**Quick test after review:**
-```bash
-# Terminal 1: Start database and seed
-make db-up && make seed
+---
 
-# Terminal 2: Start gRPC server
-make grpc-server
+## Architecture
 
-# Terminal 3: Start REST server
-make rest-server
+```
+┌──────────────────────────────────────┐
+│         Benchmark Controller         │
+│      cmd/benchmark/main.go           │
+└────────────┬─────────────────────────┘
+             │
+    ┌────────┴────────┐
+    │                 │
+┌───▼────┐       ┌────▼───┐
+│  REST  │       │  gRPC  │
+│ :8080  │       │ :50051 │
+└───┬────┘       └────┬───┘
+    │                 │
+    └────────┬────────┘
+             │
+      ┌──────▼──────┐
+      │  PostgreSQL │
+      └─────────────┘
 
-# Terminal 4: Test endpoints
-curl http://localhost:8080/health
-curl http://localhost:8080/api/v1/accounts/0.0.100000/balance
-grpcurl -plaintext localhost:50051 list
+Phase 2 clients (not yet built):
+  Go baseline │ Python grpcio │ Python Hedera SDK │ Rust/tonic
 ```
 
 ---
 
-## Next Step: Benchmark Runner
-
-After code review, implement `cmd/benchmark/main.go`:
-
-```bash
-# Target CLI interface
-./benchmark --scenario=balance --protocol=grpc --concurrency=50 --duration=60s
-./benchmark --scenario=stream --protocol=rest --rate=100 --duration=60s
-```
-
-**Key components:**
-- CLI flag parsing (scenario, protocol, concurrency, duration, rate)
-- gRPC client with connection reuse
-- HTTP client with keep-alive
-- Concurrent worker pool for load generation
-- Latency measurement (time.Now → response received)
-- Results storage via `pkg/db/benchmark.go`
-- Console summary output
-
----
-
-## What's Done
-
-- `migrations/001_init.sql` - Full schema with accounts, transactions, benchmark results, stats view
-- `pkg/protos/benchmark.proto` - BalanceService, TransactionService, Health definitions
-- `pkg/protos/benchmark.pb.go` - Generated message types
-- `pkg/protos/benchmark_grpc.pb.go` - Generated service interfaces
-- `scripts/seed_data.sql` - 10K accounts, 100K transactions with realistic distribution
-- `docker-compose.yml` - PostgreSQL 16 with health checks
-- `Makefile` - proto, seed, benchmark, grpc-server, rest-server, clean targets
-- `pkg/db/*.go` - Database client layer
-- `cmd/grpc-server/main.go` - gRPC server implementation
-- `cmd/rest-server/main.go` - REST server implementation
-
----
-
-## Scenario 1: Account Balance Query
-
-**Business Context:** Financial systems query balances for dashboards, portfolios, reconciliation.
-
-**Endpoints:**
-| Protocol | Endpoint | Payload |
-|----------|----------|---------|
-| REST | `GET /api/v1/accounts/{id}/balance` | ~100 bytes JSON |
-| gRPC | `BalanceService.GetBalance()` | ~50 bytes protobuf |
-
-**Workload:**
-- Random account selection (uniform distribution)
-- No caching (force DB hit)
-- Concurrency levels: 1, 10, 50, 100, 200
-
-**Success Criteria:**
-- p99 latency < 100ms at 50 concurrent
-- No errors under 100 concurrent requests
-
-**Metrics:** Latency (p50/p90/p99), throughput (req/s), error rate
-
----
-
-## Scenario 2: Transaction Event Stream
-
-**Business Context:** Real-time monitoring for block explorers, trading dashboards, compliance.
-
-**Endpoints:**
-| Protocol | Endpoint | Implementation |
-|----------|----------|----------------|
-| REST | `GET /api/v1/transactions/stream` | Server-Sent Events (SSE) |
-| gRPC | `TransactionService.StreamTransactions()` | Server streaming RPC |
-
-**Workload:**
-| Scenario | Rate (tx/sec) | Duration | Clients |
-|----------|---------------|----------|---------|
-| Low load | 10 | 60s | 1 |
-| Medium load | 100 | 60s | 5 |
-| High load | 500 | 60s | 10 |
-| Burst | 1000 | 10s | 1 |
-
-**Success Criteria:**
-- No dropped events
-- Events arrive in order
-- Connection stable for full duration
-
-**Metrics:** Event delivery latency, throughput, connection overhead, missed events
-
----
-
-## Implementation Tasks
-
-### Step 1: Generate Proto & Add Dependencies
-```bash
-make proto
-```
-
-Update `go.mod`:
-```
-google.golang.org/grpc
-google.golang.org/protobuf
-github.com/jackc/pgx/v5
-```
-
-### Step 2: Database Client (`pkg/db/`)
-
-| File | Functions |
-|------|-----------|
-| `db.go` | `NewPool(connString)`, connection config |
-| `accounts.go` | `GetBalance(accountID)`, `GetBalances([]accountID)` |
-| `transactions.go` | `StreamTransactions(since, rateLimit, filter)` |
-| `benchmark.go` | `RecordRun()`, `RecordSample()` |
-
-### Step 3: gRPC Server (`cmd/grpc-server/`)
-
-| File | Purpose |
-|------|---------|
-| `main.go` | Bootstrap, listen `:50051` |
-| `balance.go` | Implement `GetBalance`, `GetBalances` |
-| `transactions.go` | Implement `StreamTransactions` |
-| `health.go` | Implement health check |
-
-### Step 4: REST Server (`cmd/rest-server/`)
-
-| Endpoint | Handler |
-|----------|---------|
-| `GET /api/v1/accounts/{id}/balance` | JSON response |
-| `GET /api/v1/accounts/balances?ids=...` | Batch JSON |
-| `GET /api/v1/transactions/stream` | SSE with `text/event-stream` |
-| `GET /health` | Health check |
-
-Use stdlib `net/http` to keep comparison fair (no framework overhead).
-
-### Step 5: Benchmark Runner (`cmd/benchmark/`)
-
-| File | Purpose |
-|------|---------|
-| `main.go` | CLI flags, orchestration |
-| `grpc_client.go` | gRPC client with connection pooling |
-| `rest_client.go` | HTTP client with keep-alive |
-| `runner.go` | Concurrent load generation |
-| `reporter.go` | Write to DB, console output |
-
-**CLI Usage:**
-```bash
-# Balance query benchmark
-./benchmark --scenario=balance --protocol=grpc --concurrency=50 --duration=60s
-
-# Streaming benchmark
-./benchmark --scenario=stream --protocol=rest --rate=100 --duration=60s
-```
-
----
-
-## Target File Structure
+## File Structure
 
 ```
 grpc-rest-benchmark/
 ├── cmd/
-│   ├── grpc-server/
-│   │   └── main.go
-│   ├── rest-server/
-│   │   └── main.go
-│   └── benchmark/
-│       └── main.go
+│   ├── grpc-server/main.go       # gRPC server, port 50051
+│   ├── rest-server/main.go       # REST server, port 8080
+│   └── benchmark/main.go         # CLI benchmark runner
 ├── pkg/
 │   ├── db/
-│   │   ├── db.go
-│   │   ├── accounts.go
-│   │   ├── transactions.go
-│   │   └── benchmark.go
+│   │   ├── db.go                 # Connection pool setup
+│   │   ├── accounts.go           # GetBalance, GetBalances, GetRandomAccountID
+│   │   ├── transactions.go       # StreamTransactions (channel-based)
+│   │   └── benchmark.go          # RecordRun, RecordSample, GetStats
 │   └── protos/
-│       ├── benchmark.proto          (exists)
-│       ├── benchmark.pb.go          (generated)
-│       └── benchmark_grpc.pb.go     (generated)
+│       ├── benchmark.proto
+│       ├── benchmark.pb.go       # Generated
+│       └── benchmark_grpc.pb.go  # Generated
+├── clients/
+│   └── python/
+│       ├── grpc_client.py        # Python gRPC benchmark client
+│       ├── requirements.txt      # grpcio, psycopg
+│       └── generate_proto.sh     # Proto stub generation
 ├── migrations/
-│   └── 001_init.sql                 (exists)
-├── scripts/
-│   └── seed_data.sql                (exists)
-├── docker-compose.yml               (exists)
-├── Makefile                         (exists)
-└── go.mod                           (exists, needs deps)
+│   ├── 001_init.sql              # Schema: accounts, transactions, benchmark tables
+│   └── 002_add_client_column.sql # Adds client column for multi-language tracking
+├── scripts/seed_data.sql         # 10K accounts, 100K transactions
+├── docker-compose.yml            # PostgreSQL 16
+└── Makefile                      # proto, seed, python-benchmark, etc.
 ```
 
 ---
 
-## Dependency Order
+## Scenarios
 
-```
-Step 1 ──► Step 2 ──► Step 3 ──► Step 5
-                 └──► Step 4 ──┘
-```
+### Scenario 1: Token Balance Queries ✅ Complete
+- `GET /api/v1/accounts/{id}/balance` (REST, ~100 bytes JSON)
+- `BalanceService.GetBalance()` (gRPC, ~50 bytes protobuf)
+- Workload: random account selection, no caching, concurrency levels 1/10/50/100/200
+- Metrics: p50/p90/p99 latency, throughput (req/s), error rate
 
-Steps 3 and 4 (servers) can be built in parallel after Step 2 (db client).
+### Scenario 2: Transaction Stream Processing ✅ Complete
+- `GET /api/v1/transactions/stream` (REST, SSE with `text/event-stream`)
+- `TransactionService.StreamTransactions()` (gRPC, server streaming RPC)
+- Workload: 10/100/500/1000 tx/sec at 1-10 clients
+- Metrics: event delivery latency, throughput, missed events
 
 ---
 
-## Expected Results
+## Benchmark CLI
 
-**Hypothesis to test:**
-- gRPC lower latency on balance queries (binary encoding, HTTP/2)
-- gRPC lower per-event overhead on streaming
-- REST SSE simpler connection handling but higher payload size
-- gRPC better backpressure handling (built-in flow control)
+```bash
+./benchmark --scenario=balance --protocol=grpc --concurrency=50 --duration=60s
+./benchmark --scenario=stream --protocol=rest --rate=100 --duration=60s
+```
 
-**Payload comparison:**
-| Scenario | REST JSON | gRPC Protobuf |
-|----------|-----------|---------------|
-| Balance response | ~100 bytes | ~50 bytes |
-| Transaction event | ~200 bytes | ~100 bytes |
+---
+
+## Phase 2: Multi-Language Clients 🔄 IN PROGRESS
+
+Goal: measure SDK abstraction overhead vs raw transport across languages. All clients hit the existing Go servers — no server changes needed.
+
+### 2a. Python raw gRPC client ✅ Complete
+- **Location:** `clients/python/grpc_client.py`
+- Use `grpcio` + generated proto stubs
+- Implements both scenarios (balance queries + streaming)
+- Results tagged with `client=python-grpc` in PostgreSQL
+- Run: `make python-benchmark ARGS="--scenario=balance --duration=30"`
+
+### 2b. Python Hedera SDK client
+- **Location:** `clients/python/sdk_client.py`
+- SDK repo: https://github.com/hiero-ledger/hiero-sdk-python
+- Use Hedera Python SDK for transport
+- Implement balance query scenario only (SDK doesn't expose raw streaming cleanly)
+- Three-way comparison: raw gRPC vs raw REST vs SDK
+
+### 2c. Resource profiling
+- Add CPU/memory tracking to the Go benchmark harness
+- Schema already has `cpu_usage_avg`, `memory_mb_avg` columns in `benchmark_runs` — just populate them
+- Use `runtime.ReadMemStats` for Go, `psutil` for Python, appropriate crate for Rust
+
+### 2d. Realistic workload replay
+- HCS API docs: https://docs.hedera.com/hedera/sdks-and-apis/hedera-consensus-service-api
+- Replace synthetic uniform-random seed data with replayed HCS topic timing patterns
+- **Location:** `scripts/replay_seed.go` or `scripts/replay_seed.py`
+- Source: pull timing distribution from a public HCS topic, replay at 1x speed
+
+### 2e. Rust client using `tonic`
+- **Location:** `clients/rust/src/main.rs`
+- Implement balance query scenario first, stretch to streaming
+- Use `tonic` for gRPC, `reqwest` for REST baseline
+- Same CLI flags pattern as Go benchmark runner
+
+### 2f. Unit tests
+- `pkg/db/*_test.go` — test query functions against a test DB
+- `cmd/benchmark/*_test.go` — test latency measurement and result aggregation
+
+### 2g. Connection pooling audit
+- Review `pkg/db/db.go` pool config (MaxConns, MinConns, MaxConnLifetime)
+- Add retry logic with exponential backoff for transient connection errors
+- Verify Python and Rust clients use equivalent pooling strategies
+
+---
+
+## Phase 3: Dashboard & Docs 📋 PLANNED
+
+- Single-page HTML + Chart.js dashboard reading from PostgreSQL
+  - Latency distribution charts (p50/p90/p99 per protocol/language)
+  - Throughput comparison bar charts
+- Results API endpoint (`GET /api/v1/results?scenario=balance&run_id=...`)
+- README with setup instructions and results summary
+- Blog post: "When should you use gRPC? Here's the data"
+
+---
+
+## Quick Start
+
+```bash
+# Start DB and seed
+make db-up && make seed
+
+# Run servers (separate terminals)
+make grpc-server
+make rest-server
+
+# Run a benchmark
+make benchmark ARGS="--scenario=balance --protocol=grpc --concurrency=50 --duration=60s"
+
+# Verify
+curl http://localhost:8080/health
+curl http://localhost:8080/api/v1/accounts/0.0.100000/balance
+grpcurl -plaintext localhost:50051 list
+```

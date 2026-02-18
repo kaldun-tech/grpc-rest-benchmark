@@ -30,14 +30,19 @@ make clean
 
 ## Architecture
 
-**Planned structure:**
-- `cmd/benchmark/main.go` - Main benchmark entry point
-- `pkg/protos/benchmark.proto` - Protocol buffer definitions
-- `scripts/seed_data.sql` - PostgreSQL seed data
-- `docker-compose.yml` - PostgreSQL container setup
+```
+cmd/
+  grpc-server/main.go    # gRPC server on :50051
+  rest-server/main.go    # REST server on :8080
+  benchmark/main.go      # CLI benchmark runner
+pkg/
+  db/                    # PostgreSQL client (accounts, transactions, benchmark results)
+  protos/                # Proto definitions and generated Go code
+migrations/001_init.sql  # Schema: accounts, transactions, benchmark tables
+scripts/seed_data.sql    # 10K accounts, 100K transactions
+docker-compose.yml       # PostgreSQL 16
+```
 
-**Test scenarios:**
-1. High-frequency balance queries
-2. Real-time transaction event streaming
-3. Bulk historical data retrieval
-4. State update operations
+**Benchmark scenarios:**
+1. Balance queries — high-frequency unary requests
+2. Transaction streaming — server-side streaming (gRPC) vs SSE (REST)

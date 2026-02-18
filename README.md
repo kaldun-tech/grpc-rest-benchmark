@@ -1,8 +1,18 @@
 # gRPC vs REST Performance Benchmark
 
-Performance comparison of gRPC and REST protocols for financial infrastructure workloads commonly found in blockchain custody, exchanges, and payment systems.
+Performance comparison of gRPC and REST protocols for Hedera-style financial infrastructure workloads (blockchain custody, exchanges, payment systems).
 
 Built in Go with a PostgreSQL backend to isolate transport layer performance from application logic.
+
+## Phase 1 Results
+
+| Metric | gRPC | REST | Difference |
+|--------|------|------|------------|
+| Throughput (50+ concurrency) | ~17-18% higher | baseline | gRPC wins |
+| p99 latency (50+ concurrency) | 15-22% lower | baseline | gRPC wins |
+| Streaming throughput | ~equal | ~equal | parity |
+
+Both protocols hit DB connection pool saturation around 10K req/s.
 
 ## Quick Start
 
@@ -58,12 +68,12 @@ Server-side streaming pattern simulating real-time transaction event feeds.
 
 ```
 ├── cmd/
-│   ├── server/          # gRPC + REST server
-│   └── benchmark/       # Benchmark runner
+│   ├── grpc-server/     # gRPC server (:50051)
+│   ├── rest-server/     # REST server (:8080)
+│   └── benchmark/       # CLI benchmark runner
 ├── pkg/
-│   ├── protos/          # Protocol buffer definitions
-│   ├── db/              # PostgreSQL client
-│   └── models/          # Shared data types
+│   ├── protos/          # Protocol buffer definitions + generated code
+│   └── db/              # PostgreSQL client (accounts, transactions, results)
 ├── migrations/          # Database schema
 └── scripts/             # Seed data generation
 ```

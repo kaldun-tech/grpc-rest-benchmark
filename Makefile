@@ -1,5 +1,6 @@
 .PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers \
-        benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest
+        benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest \
+        python-deps python-proto python-benchmark migrate
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -55,7 +56,25 @@ benchmark-stream-grpc:
 benchmark-stream-rest:
 	go run cmd/benchmark/*.go --scenario=stream --protocol=rest --duration=10s --rate=100
 
+# Run database migrations
+migrate: db-up
+	@for f in migrations/*.sql; do \
+		echo "Running migration: $$f"; \
+		docker-compose exec -T postgres psql -U benchmark -d grpc_benchmark < "$$f"; \
+	done
+
+# Python client targets
+python-deps:
+	pip install -r clients/python/requirements.txt
+
+python-proto: python-deps
+	cd clients/python && ./generate_proto.sh
+
+python-benchmark: python-proto
+	python clients/python/grpc_client.py $(ARGS)
+
 # Clean up: stop containers, remove volumes, delete generated code
 clean:
 	docker-compose down -v
 	rm -f pkg/protos/*.pb.go
+	rm -rf clients/python/proto
