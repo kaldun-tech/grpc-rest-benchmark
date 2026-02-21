@@ -21,7 +21,23 @@
       "Bash(./bin/benchmark:*)",
       "Bash(chmod:*)",
       "Bash(docker-compose up:*)",
-      "Bash(make seed:*)"
+      "Bash(make seed:*)",
+      "WebFetch(domain:github.com)",
+      "Bash(python3:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:pypi.org)",
+      "Bash(test:*)",
+      "Bash(until docker-compose exec -T postgres pg_isready -U benchmark)",
+      "Bash(do sleep 1)",
+      "Bash(done)",
+      "Bash(python:*)",
+      "Bash(docker ps:*)",
+      "Bash(docker compose:*)",
+      "Bash(go doc:*)",
+      "Bash(go run:*)",
+      "Bash(pip install:*)",
+      "Bash(./generate_proto.sh:*)",
+      "Bash(git check-ignore:*)"
     ]
   }
 }

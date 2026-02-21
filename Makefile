@@ -1,6 +1,6 @@
 .PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers \
         benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest \
-        python-deps python-proto python-benchmark migrate
+        python-deps python-proto python-benchmark python-sdk-benchmark migrate
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -72,6 +72,10 @@ python-proto: python-deps
 
 python-benchmark: python-proto
 	python clients/python/grpc_client.py $(ARGS)
+
+# Python SDK benchmark (requires HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY env vars)
+python-sdk-benchmark: python-deps
+	python clients/python/sdk_client.py $(ARGS)
 
 # Clean up: stop containers, remove volumes, delete generated code
 clean:

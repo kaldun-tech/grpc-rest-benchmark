@@ -1,10 +1,21 @@
 #!/usr/bin/env python3
 """
-Python gRPC benchmark client for comparing against Go implementation.
-Implements the same scenarios as the Go benchmark runner.
+Python Hedera SDK benchmark client for measuring SDK abstraction overhead.
+
+This client uses the Hedera Python SDK to query account balances on the Hedera
+network (testnet by default). Unlike the raw gRPC client that talks to our local
+servers, this measures real SDK overhead against Hedera's infrastructure.
+
+Comparison methodology:
+- python-grpc: Raw gRPC to local server (transport + local DB)
+- python-sdk: Hedera SDK to testnet (SDK overhead + network + Hedera consensus)
+
+The SDK adds abstraction layers (retries, signing, query construction) that we
+want to quantify. Network latency will dominate, but p50/p99 spread shows SDK overhead.
 """
 
 import argparse
+import os
 import random
 import signal
 import sys
@@ -12,15 +23,26 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from threading import Event, Lock
 from typing import Optional
 
-import grpc
+from dotenv import load_dotenv
 import psycopg
 
-# Generated proto imports (run generate_proto.sh first)
-from proto import benchmark_pb2, benchmark_pb2_grpc
 from resources import ResourceMonitor, ResourceStats
+
+try:
+    from hiero_sdk_python import (
+        Client,
+        Network,
+        AccountId,
+        PrivateKey,
+        CryptoGetAccountBalanceQuery,
+    )
+except ImportError:
+    print("Hedera SDK not installed. Run: pip install hiero-sdk-python")
+    sys.exit(1)
 
 
 @dataclass
@@ -156,7 +178,6 @@ class Results:
             )
             run_id = cur.fetchone()[0]
 
-            # Batch insert samples using COPY
             with cur.copy(
                 "COPY benchmark_samples (run_id, latency_ms, success, error_type, timestamp) FROM STDIN"
             ) as copy:
@@ -172,7 +193,6 @@ class Results:
             conn.commit()
             print(f"Results saved to database (run_id: {run_id})")
 
-            # Retrieve stats from view
             cur.execute(
                 """
                 SELECT p50_latency, p90_latency, p99_latency
@@ -187,32 +207,43 @@ class Results:
                 print(f"  p50: {row[0]:.2f}ms, p90: {row[1]:.2f}ms, p99: {row[2]:.2f}ms")
 
 
-class GRPCBenchmarkClient:
-    """gRPC client for benchmark scenarios."""
+class HederaSDKClient:
+    """Hedera SDK client for benchmark scenarios."""
 
-    def __init__(self, addr: str):
-        self.channel = grpc.insecure_channel(addr)
-        self.balance_stub = benchmark_pb2_grpc.BalanceServiceStub(self.channel)
-        self.tx_stub = benchmark_pb2_grpc.TransactionServiceStub(self.channel)
+    def __init__(self, network: str, operator_id: str, operator_key: str):
+        """
+        Initialize Hedera SDK client.
 
-    def get_balance(self, account_id: str) -> None:
-        """Execute a single balance query."""
-        self.balance_stub.GetBalance(benchmark_pb2.BalanceRequest(account_id=account_id))
+        Args:
+            network: Network name ('testnet', 'mainnet', 'previewnet')
+            operator_id: Operator account ID (e.g., '0.0.12345')
+            operator_key: Operator private key (DER encoded hex string)
+        """
+        self.network_name = network
+        self._network = Network(network)
+        self._client = Client(self._network)
 
-    def stream_transactions(self, rate: int, stop_event: Event):
-        """Subscribe to transaction stream, yielding events until stopped."""
-        request = benchmark_pb2.StreamRequest(rate_limit=rate)
-        try:
-            for tx in self.tx_stub.StreamTransactions(request):
-                if stop_event.is_set():
-                    break
-                yield tx
-        except grpc.RpcError:
-            if not stop_event.is_set():
-                raise
+        self._operator_id = AccountId.from_string(operator_id)
+        self._operator_key = PrivateKey.from_string(operator_key)
+        self._client.set_operator(self._operator_id, self._operator_key)
+
+    def get_balance(self, account_id: str) -> float:
+        """
+        Query account balance from Hedera network.
+
+        Args:
+            account_id: Account ID to query (e.g., '0.0.12345')
+
+        Returns:
+            Balance in hbars
+        """
+        aid = AccountId.from_string(account_id)
+        balance = CryptoGetAccountBalanceQuery(account_id=aid).execute(self._client)
+        return balance.hbars
 
     def close(self):
-        self.channel.close()
+        """Close the client connection."""
+        self._client.close()
 
 
 class Runner:
@@ -220,15 +251,13 @@ class Runner:
 
     def __init__(
         self,
-        client: GRPCBenchmarkClient,
+        client: HederaSDKClient,
         account_ids: list[str],
         concurrency: int,
-        rate: int,
     ):
         self.client = client
         self.account_ids = account_ids
         self.concurrency = concurrency
-        self.rate = rate
         self.results = Results()
         self._stop_event = Event()
         self._rng_lock = Lock()
@@ -270,110 +299,136 @@ class Runner:
         with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
             futures = [executor.submit(worker) for _ in range(self.concurrency)]
             for future in as_completed(futures):
-                future.result()  # Raise any exceptions
-
-        self.results.set_end_time(datetime.now())
-
-    def run_stream(self, duration_sec: float):
-        """Execute streaming benchmark with concurrent stream consumers."""
-        self.results.set_start_time(datetime.now())
-        end_time = time.time() + duration_sec
-
-        def worker():
-            last_event_time = None
-            try:
-                for _ in self.client.stream_transactions(self.rate, self._stop_event):
-                    if time.time() >= end_time:
-                        break
-
-                    now = time.time()
-                    latency_ms = 0.0
-                    if last_event_time is not None:
-                        latency_ms = (now - last_event_time) * 1000
-                    last_event_time = now
-
-                    self.results.add(Sample(
-                        latency_ms=latency_ms,
-                        success=True,
-                        error=None,
-                        timestamp=datetime.now(),
-                    ))
-            except Exception as e:
-                if not self._stop_event.is_set():
-                    self.results.add(Sample(
-                        latency_ms=0,
-                        success=False,
-                        error=str(e),
-                        timestamp=datetime.now(),
-                    ))
-
-        with ThreadPoolExecutor(max_workers=self.concurrency) as executor:
-            futures = [executor.submit(worker) for _ in range(self.concurrency)]
-
-            # Wait for duration or stop
-            while time.time() < end_time and not self._stop_event.is_set():
-                time.sleep(0.1)
-
-            self._stop_event.set()
-            for future in as_completed(futures):
-                try:
-                    future.result()
-                except Exception:
-                    pass
+                future.result()
 
         self.results.set_end_time(datetime.now())
 
 
-def load_account_ids(conn: psycopg.Connection) -> list[str]:
-    """Load all account IDs from the database."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT account_id FROM accounts")
-        return [row[0] for row in cur.fetchall()]
+def load_hedera_account_ids(count: int, base_account: str) -> list[str]:
+    """
+    Generate a list of Hedera account IDs to query.
+
+    For testnet benchmarking, we query a range of accounts around the base account.
+    Many will return zero balance, but that's fine for latency measurement.
+
+    Args:
+        count: Number of account IDs to generate
+        base_account: Base account ID (e.g., '0.0.12345')
+
+    Returns:
+        List of account IDs
+    """
+    parts = base_account.split('.')
+    shard = int(parts[0])
+    realm = int(parts[1])
+    base_num = int(parts[2])
+
+    account_ids = []
+    for i in range(count):
+        # Spread accounts around the base number
+        offset = i - count // 2
+        num = max(1, base_num + offset)
+        account_ids.append(f"{shard}.{realm}.{num}")
+
+    return account_ids
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Python gRPC benchmark client")
-    parser.add_argument("--scenario", default="balance", choices=["balance", "stream"],
-                        help="Benchmark scenario")
-    parser.add_argument("--concurrency", type=int, default=10,
-                        help="Number of parallel workers")
+    parser = argparse.ArgumentParser(
+        description="Python Hedera SDK benchmark client",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Environment variables:
+  HEDERA_OPERATOR_ID    Operator account ID (required)
+  HEDERA_OPERATOR_KEY   Operator private key (required)
+
+Example:
+  export HEDERA_OPERATOR_ID="0.0.12345"
+  export HEDERA_OPERATOR_KEY="302e020100300506..."
+  python sdk_client.py --network=testnet --duration=30
+        """
+    )
+    parser.add_argument("--network", default="testnet",
+                        choices=["testnet", "mainnet", "previewnet"],
+                        help="Hedera network to connect to")
+    parser.add_argument("--concurrency", type=int, default=5,
+                        help="Number of parallel workers (default: 5, keep low to avoid rate limits)")
     parser.add_argument("--duration", type=int, default=30,
                         help="Test duration in seconds")
-    parser.add_argument("--rate", type=int, default=0,
-                        help="Events per second for streaming (0 = unlimited)")
-    parser.add_argument("--grpc-addr", default="localhost:50051",
-                        help="gRPC server address")
+    parser.add_argument("--account-count", type=int, default=100,
+                        help="Number of accounts to query (spread around operator ID)")
 
-    # Database flags
+    # Database flags for storing results
     parser.add_argument("--db-host", default="localhost")
     parser.add_argument("--db-port", type=int, default=5432)
     parser.add_argument("--db-user", default="benchmark")
     parser.add_argument("--db-pass", default="benchmark_pass")
     parser.add_argument("--db-name", default="grpc_benchmark")
+    parser.add_argument("--skip-db", action="store_true",
+                        help="Skip storing results in database")
 
     args = parser.parse_args()
 
-    # Connect to database
-    conn_str = f"host={args.db_host} port={args.db_port} user={args.db_user} password={args.db_pass} dbname={args.db_name}"
-    conn = psycopg.connect(conn_str)
-    print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port}")
+    # Load .env file if present (check multiple locations)
+    env_paths = [
+        Path.cwd() / ".env",
+        Path(__file__).parent / ".env",
+        Path.cwd() / "clients" / "python" / ".env",
+    ]
+    for env_path in env_paths:
+        if env_path.exists():
+            load_dotenv(env_path)
+            print(f"Loaded credentials from {env_path}")
+            break
 
-    # Load account IDs for balance scenario
-    account_ids = []
-    if args.scenario == "balance":
-        print("Loading account IDs from database...")
-        account_ids = load_account_ids(conn)
-        if not account_ids:
-            print("No accounts found in database. Run 'make seed' first.")
-            sys.exit(1)
-        print(f"Loaded {len(account_ids)} account IDs")
+    # Load operator credentials from environment
+    operator_id = os.environ.get("HEDERA_OPERATOR_ID")
+    operator_key = os.environ.get("HEDERA_OPERATOR_KEY")
 
-    # Create gRPC client
-    client = GRPCBenchmarkClient(args.grpc_addr)
-    print(f"Connected to gRPC server at {args.grpc_addr}")
+    if not operator_id or not operator_key:
+        print("Error: HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY environment variables required")
+        print("\nGet free testnet credentials at: https://portal.hedera.com/")
+        print("Then export them:")
+        print('  export HEDERA_OPERATOR_ID="0.0.xxxxx"')
+        print('  export HEDERA_OPERATOR_KEY="302e020100300506..."')
+        sys.exit(1)
+
+    # Connect to database (optional)
+    conn = None
+    if not args.skip_db:
+        try:
+            conn_str = f"host={args.db_host} port={args.db_port} user={args.db_user} password={args.db_pass} dbname={args.db_name}"
+            conn = psycopg.connect(conn_str)
+            print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port}")
+        except Exception as e:
+            print(f"Warning: Could not connect to database: {e}")
+            print("Results will not be persisted. Use --skip-db to suppress this warning.")
+
+    # Generate account IDs to query
+    print(f"Generating {args.account_count} account IDs around {operator_id}...")
+    account_ids = load_hedera_account_ids(args.account_count, operator_id)
+
+    # Create Hedera SDK client
+    print(f"Connecting to Hedera {args.network}...")
+    try:
+        client = HederaSDKClient(args.network, operator_id, operator_key)
+    except Exception as e:
+        print(f"Error initializing Hedera SDK client: {e}")
+        sys.exit(1)
+    print(f"Connected to Hedera {args.network} as {operator_id}")
+
+    # Verify connectivity with a test query
+    print("Verifying connectivity with test balance query...")
+    try:
+        balance = client.get_balance(operator_id)
+        print(f"Operator balance: {balance} HBAR")
+    except Exception as e:
+        print(f"Error querying balance: {e}")
+        print("Check your credentials and network connectivity.")
+        sys.exit(1)
 
     # Create runner
-    runner = Runner(client, account_ids, args.concurrency, args.rate)
+    runner = Runner(client, account_ids, args.concurrency)
 
     # Handle interrupt signals
     def signal_handler(sig, frame):
@@ -384,40 +439,35 @@ def main():
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Run benchmark
-    print(f"\nStarting {args.scenario} benchmark (grpc protocol, python client)")
-    print(f"Concurrency: {args.concurrency} | Duration: {args.duration}s", end="")
-    if args.scenario == "stream" and args.rate > 0:
-        print(f" | Rate limit: {args.rate} events/s", end="")
-    print("\n")
+    print(f"\nStarting balance benchmark (hedera-sdk protocol, python client)")
+    print(f"Network: {args.network} | Concurrency: {args.concurrency} | Duration: {args.duration}s")
+    print(f"Note: Hedera testnet has rate limits; high concurrency may cause errors\n")
 
     # Start resource monitoring
     resource_monitor = ResourceMonitor(interval_ms=100)
     stop_monitor = resource_monitor.start()
 
-    if args.scenario == "balance":
-        runner.run_balance(args.duration)
-    else:
-        runner.run_stream(args.duration)
+    runner.run_balance(args.duration)
 
     # Stop resource monitoring and record stats
     resource_stats = stop_monitor()
     runner.results.set_resource_stats(resource_stats)
 
     # Print and store results
-    runner.results.print_summary(args.scenario, "grpc", args.concurrency)
+    runner.results.print_summary("balance", "hedera-sdk", args.concurrency)
 
-    rate_limit = args.rate if args.scenario == "stream" and args.rate > 0 else None
-    runner.results.store_results(
-        conn,
-        scenario=args.scenario,
-        protocol="grpc",
-        client="python-grpc",
-        concurrency=args.concurrency,
-        rate_limit=rate_limit,
-    )
+    if conn:
+        runner.results.store_results(
+            conn,
+            scenario="balance",
+            protocol="hedera-sdk",
+            client="python-sdk",
+            concurrency=args.concurrency,
+            rate_limit=None,
+        )
+        conn.close()
 
     client.close()
-    conn.close()
 
 
 if __name__ == "__main__":

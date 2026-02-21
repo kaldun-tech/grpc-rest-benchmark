@@ -11,9 +11,10 @@ import (
 
 // Results collects and analyzes benchmark samples.
 type Results struct {
-	samples   []Sample
-	startTime time.Time
-	endTime   time.Time
+	samples       []Sample
+	startTime     time.Time
+	endTime       time.Time
+	resourceStats *ResourceStats
 }
 
 // NewResults creates a new Results collector.
@@ -31,6 +32,11 @@ func (r *Results) SetStartTime(t time.Time) {
 // SetEndTime records when the benchmark ended.
 func (r *Results) SetEndTime(t time.Time) {
 	r.endTime = t
+}
+
+// SetResourceStats records resource usage metrics.
+func (r *Results) SetResourceStats(stats ResourceStats) {
+	r.resourceStats = &stats
 }
 
 // Add adds a sample to the results.
@@ -170,6 +176,13 @@ func (r *Results) PrintSummary(scenario, protocol string, concurrency int) {
 	fmt.Printf("  min:  %s\n", formatLatency(r.MinLatency()))
 	fmt.Printf("  max:  %s\n", formatLatency(r.MaxLatency()))
 	fmt.Printf("Errors:      %d (%.2f%%)\n", r.TotalRequests()-r.SuccessfulRequests(), r.ErrorRate())
+
+	if r.resourceStats != nil {
+		fmt.Println("Resources:")
+		fmt.Printf("  CPU avg:   %.1f%%\n", r.resourceStats.CPUAvgPercent)
+		fmt.Printf("  Mem avg:   %.1f MB\n", r.resourceStats.MemoryAvgMB)
+		fmt.Printf("  Mem peak:  %.1f MB\n", r.resourceStats.MemoryPeakMB)
+	}
 	fmt.Println()
 }
 
@@ -189,6 +202,13 @@ func (r *Results) StoreResults(ctx context.Context, database *db.DB, scenario, p
 		Concurrency: concurrency,
 		DurationSec: int(r.Duration().Seconds()),
 		RateLimit:   rateLimit,
+	}
+
+	// Add resource metrics if available
+	if r.resourceStats != nil {
+		run.CPUUsageAvg = &r.resourceStats.CPUAvgPercent
+		run.MemoryMBAvg = &r.resourceStats.MemoryAvgMB
+		run.MemoryMBPeak = &r.resourceStats.MemoryPeakMB
 	}
 
 	runID, err := database.RecordRun(ctx, run)

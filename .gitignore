@@ -39,3 +39,11 @@ docker-compose.override.yml
 benchmark_results/
 bin/
 /benchmark
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Generated protobuf code (Python)
+clients/python/proto/

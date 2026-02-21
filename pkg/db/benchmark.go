@@ -18,6 +18,11 @@ type BenchmarkRun struct {
 	DurationSec int
 	RateLimit   *int // nullable, for streaming scenarios
 	CreatedAt   time.Time
+
+	// Resource usage metrics
+	CPUUsageAvg  *float64 // average CPU usage percentage during benchmark
+	MemoryMBAvg  *float64 // average memory usage in MB
+	MemoryMBPeak *float64 // peak memory usage in MB
 }
 
 // BenchmarkSample represents a single request latency sample.
@@ -55,10 +60,11 @@ func (db *DB) RecordRun(ctx context.Context, run *BenchmarkRun) (int64, error) {
 		client = "go"
 	}
 	err := db.Pool.QueryRow(ctx,
-		`INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit)
-		 VALUES ($1, $2, $3, $4, $5, $6)
+		`INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit, cpu_usage_avg, memory_mb_avg, memory_mb_peak)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 RETURNING id`,
 		run.Scenario, run.Protocol, client, run.Concurrency, run.DurationSec, run.RateLimit,
+		run.CPUUsageAvg, run.MemoryMBAvg, run.MemoryMBPeak,
 	).Scan(&id)
 
 	if err != nil {

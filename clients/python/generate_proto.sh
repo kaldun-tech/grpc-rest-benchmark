@@ -15,6 +15,9 @@ python -m grpc_tools.protoc \
     --grpc_python_out="$OUT_DIR" \
     "$PROTO_DIR/benchmark.proto"
 
+# Fix imports in generated grpc file to use relative imports
+sed -i 's/^import benchmark_pb2/from . import benchmark_pb2/' "$OUT_DIR/benchmark_pb2_grpc.py"
+
 # Create __init__.py for the proto package
 touch "$OUT_DIR/__init__.py"
 

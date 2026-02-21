@@ -17,7 +17,14 @@ Phase 1 results:
 
 **Phase 2a is complete.** Python gRPC client implemented. Migration 002 applied (adds `client` column to track language/client type).
 
-**Next up:** Phase 2b — Python Hedera SDK client for SDK overhead comparison.
+**Phase 2b is complete.** Python Hedera SDK client implemented and tested against Hedera testnet.
+
+Phase 2b results (run_id: 43):
+- 53 req/s throughput (vs ~3000+ req/s for local gRPC)
+- 93ms p50 latency (network round-trip to testnet)
+- 33% error rate from Hedera rate limiting at concurrency=5
+
+**Phase 2c is complete.** All clients (Go, Python gRPC, Python SDK) now track CPU/memory usage during benchmarks.
 
 ---
 
@@ -42,8 +49,10 @@ Phase 1 results:
       │  PostgreSQL │
       └─────────────┘
 
-Phase 2 clients (not yet built):
-  Go baseline │ Python grpcio │ Python Hedera SDK │ Rust/tonic
+Phase 2 clients:
+  ✅ Python grpcio     → local gRPC server
+  ✅ Python Hedera SDK → Hedera testnet
+  ⬚ Rust/tonic        → planned
 ```
 
 ---
@@ -69,7 +78,8 @@ grpc-rest-benchmark/
 ├── clients/
 │   └── python/
 │       ├── grpc_client.py        # Python gRPC benchmark client
-│       ├── requirements.txt      # grpcio, psycopg
+│       ├── sdk_client.py         # Python Hedera SDK benchmark client
+│       ├── requirements.txt      # grpcio, psycopg, hiero-sdk-python
 │       └── generate_proto.sh     # Proto stub generation
 ├── migrations/
 │   ├── 001_init.sql              # Schema: accounts, transactions, benchmark tables
@@ -117,17 +127,21 @@ Goal: measure SDK abstraction overhead vs raw transport across languages. All cl
 - Results tagged with `client=python-grpc` in PostgreSQL
 - Run: `make python-benchmark ARGS="--scenario=balance --duration=30"`
 
-### 2b. Python Hedera SDK client
+### 2b. Python Hedera SDK client ✅ Complete (awaiting first test)
 - **Location:** `clients/python/sdk_client.py`
 - SDK repo: https://github.com/hiero-ledger/hiero-sdk-python
-- Use Hedera Python SDK for transport
-- Implement balance query scenario only (SDK doesn't expose raw streaming cleanly)
+- Uses `hiero-sdk-python>=0.2.0` with `CryptoGetAccountBalanceQuery`
+- Implements balance query scenario only (SDK doesn't expose raw streaming cleanly)
 - Three-way comparison: raw gRPC vs raw REST vs SDK
+- Run: `make python-sdk-benchmark ARGS="--duration=30"`
+- Credentials: `.env` file with `HEDERA_OPERATOR_ID` and `HEDERA_OPERATOR_KEY` (get from https://portal.hedera.com/)
+- Note: Keep concurrency low (default 5) to avoid Hedera rate limits
 
-### 2c. Resource profiling
-- Add CPU/memory tracking to the Go benchmark harness
-- Schema already has `cpu_usage_avg`, `memory_mb_avg` columns in `benchmark_runs` — just populate them
-- Use `runtime.ReadMemStats` for Go, `psutil` for Python, appropriate crate for Rust
+### 2c. Resource profiling ✅ Complete
+- ✅ Go benchmark: uses `gopsutil` for CPU/memory tracking (samples every 100ms)
+- ✅ Migration 003 applied: adds `cpu_usage_avg`, `memory_mb_avg`, `memory_mb_peak` columns
+- ✅ Python clients: use `psutil` via shared `resources.py` module
+- ⬚ Rust client: will use appropriate crate when implemented
 
 ### 2d. Realistic workload replay
 - HCS API docs: https://docs.hedera.com/hedera/sdks-and-apis/hedera-consensus-service-api

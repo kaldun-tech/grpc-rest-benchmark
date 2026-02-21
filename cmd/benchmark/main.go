@@ -112,6 +112,12 @@ func main() {
 	// Setup results collector
 	results := NewResults()
 
+	// Setup resource monitor
+	resourceMonitor, err := NewResourceMonitor(100 * time.Millisecond)
+	if err != nil {
+		log.Printf("Warning: could not initialize resource monitor: %v", err)
+	}
+
 	// Create context with timeout for benchmark duration
 	benchCtx, benchCancel := context.WithTimeout(ctx, *duration)
 	defer benchCancel()
@@ -123,6 +129,12 @@ func main() {
 		fmt.Printf(" | Rate limit: %d events/s", *rate)
 	}
 	fmt.Println("\n")
+
+	// Start resource monitoring
+	var stopResourceMonitor func() ResourceStats
+	if resourceMonitor != nil {
+		stopResourceMonitor = resourceMonitor.Start(benchCtx)
+	}
 
 	results.SetStartTime(time.Now())
 
@@ -145,6 +157,12 @@ func main() {
 	<-done
 
 	results.SetEndTime(time.Now())
+
+	// Stop resource monitoring and record stats
+	if stopResourceMonitor != nil {
+		resourceStats := stopResourceMonitor()
+		results.SetResourceStats(resourceStats)
+	}
 
 	// Print summary
 	results.PrintSummary(*scenario, *protocol, *concurrency)
