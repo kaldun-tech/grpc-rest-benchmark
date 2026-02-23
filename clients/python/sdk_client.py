@@ -28,8 +28,8 @@ from threading import Event, Lock
 from typing import Optional
 
 from dotenv import load_dotenv
-import psycopg
 
+from database import Database, DBConfig
 from resources import ResourceMonitor, ResourceStats
 
 try:
@@ -152,7 +152,7 @@ class Results:
 
     def store_results(
         self,
-        conn: psycopg.Connection,
+        db: Database,
         scenario: str,
         protocol: str,
         client: str,
@@ -160,38 +160,39 @@ class Results:
         rate_limit: Optional[int],
     ):
         """Save benchmark results to PostgreSQL."""
-        with conn.cursor() as cur:
-            # Insert benchmark run with resource stats
-            cpu_avg = self.resource_stats.cpu_avg_percent if self.resource_stats else None
-            mem_avg = self.resource_stats.memory_avg_mb if self.resource_stats else None
-            mem_peak = self.resource_stats.memory_peak_mb if self.resource_stats else None
+        with db.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Insert benchmark run with resource stats
+                cpu_avg = self.resource_stats.cpu_avg_percent if self.resource_stats else None
+                mem_avg = self.resource_stats.memory_avg_mb if self.resource_stats else None
+                mem_peak = self.resource_stats.memory_peak_mb if self.resource_stats else None
 
-            cur.execute(
-                """
-                INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit,
-                                            cpu_usage_avg, memory_mb_avg, memory_mb_peak)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (scenario, protocol, client, concurrency, int(self.duration_seconds), rate_limit,
-                 cpu_avg, mem_avg, mem_peak),
-            )
-            run_id = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit,
+                                                cpu_usage_avg, memory_mb_avg, memory_mb_peak)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (scenario, protocol, client, concurrency, int(self.duration_seconds), rate_limit,
+                     cpu_avg, mem_avg, mem_peak),
+                )
+                run_id = cur.fetchone()[0]
 
-            with cur.copy(
-                "COPY benchmark_samples (run_id, latency_ms, success, error_type, timestamp) FROM STDIN"
-            ) as copy:
-                for sample in self.samples:
-                    copy.write_row((
-                        run_id,
-                        sample.latency_ms,
-                        sample.success,
-                        sample.error,
-                        sample.timestamp,
-                    ))
+                with cur.copy(
+                    "COPY benchmark_samples (run_id, latency_ms, success, error_type, timestamp) FROM STDIN"
+                ) as copy:
+                    for sample in self.samples:
+                        copy.write_row((
+                            run_id,
+                            sample.latency_ms,
+                            sample.success,
+                            sample.error,
+                            sample.timestamp,
+                        ))
 
-            conn.commit()
-            print(f"Results saved to database (run_id: {run_id})")
+                conn.commit()
+                print(f"Results saved to database (run_id: {run_id})")
 
             cur.execute(
                 """
@@ -394,12 +395,19 @@ Example:
         sys.exit(1)
 
     # Connect to database (optional)
-    conn = None
+    db = None
     if not args.skip_db:
         try:
-            conn_str = f"host={args.db_host} port={args.db_port} user={args.db_user} password={args.db_pass} dbname={args.db_name}"
-            conn = psycopg.connect(conn_str)
-            print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port}")
+            db_config = DBConfig(
+                host=args.db_host,
+                port=args.db_port,
+                user=args.db_user,
+                password=args.db_pass,
+                database=args.db_name,
+            )
+            db = Database(db_config)
+            db.connect()
+            print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port} (pooled)")
         except Exception as e:
             print(f"Warning: Could not connect to database: {e}")
             print("Results will not be persisted. Use --skip-db to suppress this warning.")
@@ -456,16 +464,16 @@ Example:
     # Print and store results
     runner.results.print_summary("balance", "hedera-sdk", args.concurrency)
 
-    if conn:
+    if db:
         runner.results.store_results(
-            conn,
+            db,
             scenario="balance",
             protocol="hedera-sdk",
             client="python-sdk",
             concurrency=args.concurrency,
             rate_limit=None,
         )
-        conn.close()
+        db.close()
 
     client.close()
 

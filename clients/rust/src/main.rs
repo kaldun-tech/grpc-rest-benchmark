@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+use deadpool_postgres::{Config as PoolConfig, Pool, Runtime};
 use futures::stream::StreamExt;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
@@ -226,25 +227,56 @@ fn parse_duration(s: &str) -> Result<Duration, String> {
     }
 }
 
-async fn fetch_account_ids(
+/// Create a database connection pool with retry logic.
+fn create_db_pool(
     db_host: &str,
     db_port: u16,
     db_user: &str,
     db_pass: &str,
     db_name: &str,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let conn_str = format!(
-        "host={} port={} user={} password={} dbname={}",
-        db_host, db_port, db_user, db_pass, db_name
-    );
+) -> Result<Pool, Box<dyn std::error::Error>> {
+    let mut cfg = PoolConfig::new();
+    cfg.host = Some(db_host.to_string());
+    cfg.port = Some(db_port);
+    cfg.user = Some(db_user.to_string());
+    cfg.password = Some(db_pass.to_string());
+    cfg.dbname = Some(db_name.to_string());
 
-    let (client, connection) = tokio_postgres::connect(&conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Database connection error: {}", e);
-        }
+    // Pool configuration
+    cfg.pool = Some(deadpool_postgres::PoolConfig {
+        max_size: 50,
+        timeouts: deadpool_postgres::Timeouts::default(),
+        ..Default::default()
     });
+
+    let pool = cfg.create_pool(Some(Runtime::Tokio1), NoTls)?;
+    Ok(pool)
+}
+
+/// Connect to database with retry logic.
+async fn connect_with_retry(pool: &Pool, max_retries: u32) -> Result<deadpool_postgres::Object, Box<dyn std::error::Error>> {
+    let mut last_err = None;
+    let mut retry_interval = Duration::from_millis(100);
+
+    for attempt in 0..=max_retries {
+        if attempt > 0 {
+            tokio::time::sleep(retry_interval).await;
+            retry_interval *= 2; // Exponential backoff
+        }
+
+        match pool.get().await {
+            Ok(client) => return Ok(client),
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+    }
+
+    Err(format!("Failed to connect after {} retries: {:?}", max_retries, last_err).into())
+}
+
+async fn fetch_account_ids(pool: &Pool) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let client = connect_with_retry(pool, 3).await?;
 
     let rows = client
         .query("SELECT account_id FROM accounts", &[])
@@ -255,28 +287,13 @@ async fn fetch_account_ids(
 }
 
 async fn store_results(
-    db_host: &str,
-    db_port: u16,
-    db_user: &str,
-    db_pass: &str,
-    db_name: &str,
+    pool: &Pool,
     scenario: &str,
     protocol: &str,
     concurrency: usize,
     results: &Results,
 ) -> Result<i32, Box<dyn std::error::Error>> {
-    let conn_str = format!(
-        "host={} port={} user={} password={} dbname={}",
-        db_host, db_port, db_user, db_pass, db_name
-    );
-
-    let (client, connection) = tokio_postgres::connect(&conn_str, NoTls).await?;
-
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("Database connection error: {}", e);
-        }
-    });
+    let client = connect_with_retry(pool, 3).await?;
 
     let duration = match (results.start_time, results.end_time) {
         (Some(start), Some(end)) => end.duration_since(start),
@@ -648,17 +665,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let duration = parse_duration(&args.duration)?;
 
+    // Create database connection pool
+    println!("Connecting to database {}@{}:{}...", args.db_name, args.db_host, args.db_port);
+    let pool = create_db_pool(
+        &args.db_host,
+        args.db_port,
+        &args.db_user,
+        &args.db_pass,
+        &args.db_name,
+    )?;
+    println!("Database pool created (max_size: 50)");
+
     // Fetch account IDs for balance scenario
     let account_ids = if args.scenario == "balance" {
         println!("Loading account IDs from database...");
-        let ids = fetch_account_ids(
-            &args.db_host,
-            args.db_port,
-            &args.db_user,
-            &args.db_pass,
-            &args.db_name,
-        )
-        .await?;
+        let ids = fetch_account_ids(&pool).await?;
         println!("Loaded {} account IDs", ids.len());
         ids
     } else {
@@ -697,11 +718,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Store results in database
     let _ = store_results(
-        &args.db_host,
-        args.db_port,
-        &args.db_user,
-        &args.db_pass,
-        &args.db_name,
+        &pool,
         &args.scenario,
         &args.protocol,
         args.concurrency,
