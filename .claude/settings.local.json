@@ -43,7 +43,9 @@
       "Bash(pgrep:*)",
       "Bash(curl:*)",
       "Bash(cargo build:*)",
-      "Bash(./clients/rust/target/release/benchmark_client:*)"
+      "Bash(./clients/rust/target/release/benchmark_client:*)",
+      "Bash(go test:*)",
+      "Bash(make test:*)"
     ]
   }
 }

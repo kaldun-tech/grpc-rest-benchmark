@@ -2,7 +2,8 @@
         benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest \
         python-deps python-proto python-benchmark python-sdk-benchmark migrate \
         fetch-hcs-timing benchmark-replay \
-        rust-build rust-benchmark
+        rust-build rust-benchmark \
+        test test-db test-benchmark
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -100,6 +101,16 @@ rust-build:
 
 rust-benchmark: rust-build
 	./clients/rust/target/release/benchmark_client $(ARGS)
+
+# Test targets (Phase 2f)
+test: test-db test-benchmark
+	@echo "All tests passed!"
+
+test-db: db-up
+	go test ./pkg/db/... -v -count=1
+
+test-benchmark:
+	go test ./cmd/benchmark/... -v -count=1
 
 # Clean up: stop containers, remove volumes, delete generated code
 clean:

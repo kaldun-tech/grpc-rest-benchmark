@@ -163,9 +163,11 @@ Goal: measure SDK abstraction overhead vs raw transport across languages. All cl
 - Results stored with `client=rust-grpc` or `client=rust-rest`
 - Run: `make rust-benchmark ARGS="--scenario=balance --protocol=grpc --duration=30s"`
 
-### 2f. Unit tests
-- `pkg/db/*_test.go` — test query functions against a test DB
-- `cmd/benchmark/*_test.go` — test latency measurement and result aggregation
+### 2f. Unit tests ✅ Complete
+- `pkg/db/*_test.go` — integration tests for accounts, transactions, benchmark storage
+- `cmd/benchmark/timing_test.go` — tests for HCS timing replay
+- `cmd/benchmark/reporter_test.go` — tests for latency calculation and result aggregation
+- Run: `make test` (runs all), `make test-db`, `make test-benchmark`
 
 ### 2g. Connection pooling audit
 - Review `pkg/db/db.go` pool config (MaxConns, MinConns, MaxConnLifetime)
