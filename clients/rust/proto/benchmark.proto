@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+package benchmark;
+
+option go_package = "github.com/kaldun-tech/grpc-rest-benchmark/pkg/protos";
+
+// ============================================================================
+// Scenario 1: Balance Service
+// ============================================================================
+
+service BalanceService {
+  // Unary RPC: Get balance for a single account
+  rpc GetBalance(BalanceRequest) returns (BalanceResponse);
+
+  // Optional: Batch balance query (bonus scenario)
+  rpc GetBalances(BatchBalanceRequest) returns (BatchBalanceResponse);
+}
+
+message BalanceRequest {
+  string account_id = 1;  // e.g., "0.0.123456"
+}
+
+message BalanceResponse {
+  string account_id = 1;
+  int64 balance_tinybar = 2;
+  string timestamp = 3;  // ISO 8601 format
+}
+
+message BatchBalanceRequest {
+  repeated string account_ids = 1;
+}
+
+message BatchBalanceResponse {
+  repeated BalanceResponse balances = 1;
+}
+
+// ============================================================================
+// Scenario 2: Transaction Service
+// ============================================================================
+
+service TransactionService {
+  // Server streaming RPC: Subscribe to transaction events
+  rpc StreamTransactions(StreamRequest) returns (stream Transaction);
+}
+
+message StreamRequest {
+  // ISO 8601 timestamp to start from (empty = start from now)
+  string since_timestamp = 1;
+
+  // Max events per second (0 = unlimited, for rate limiting tests)
+  int32 rate_limit = 2;
+
+  // Optional filter by account (empty = all transactions)
+  string filter_account = 3;
+}
+
+message Transaction {
+  string tx_id = 1;
+  string from_account = 2;
+  string to_account = 3;
+  int64 amount_tinybar = 4;
+  string tx_type = 5;      // 'transfer', 'vesting_release', 'contract_call'
+  string timestamp = 6;    // ISO 8601 format
+}
+
+// ============================================================================
+// Optional: Health check service (standard gRPC health checking)
+// ============================================================================
+
+service Health {
+  rpc Check(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+message HealthCheckRequest {
+  string service = 1;
+}
+
+message HealthCheckResponse {
+  enum ServingStatus {
+    UNKNOWN = 0;
+    SERVING = 1;
+    NOT_SERVING = 2;
+  }
+  ServingStatus status = 1;
+}

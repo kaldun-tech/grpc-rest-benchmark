@@ -17,25 +17,32 @@ type Sample struct {
 
 // Runner manages benchmark load generation.
 type Runner struct {
-	client      BenchmarkClient
-	accountIDs  []string
-	concurrency int
-	rate        int
-	results     chan Sample
-	mu          sync.Mutex
-	rng         *rand.Rand
+	client       BenchmarkClient
+	accountIDs   []string
+	concurrency  int
+	rate         int
+	results      chan Sample
+	mu           sync.Mutex
+	rng          *rand.Rand
+	timingReplay *TimingReplay // Optional timing replay for realistic workloads
 }
 
 // NewRunner creates a new benchmark runner.
 func NewRunner(client BenchmarkClient, accountIDs []string, concurrency, rate int) *Runner {
 	return &Runner{
-		client:      client,
-		accountIDs:  accountIDs,
-		concurrency: concurrency,
-		rate:        rate,
-		results:     make(chan Sample, 10000),
-		rng:         rand.New(rand.NewSource(time.Now().UnixNano())),
+		client:       client,
+		accountIDs:   accountIDs,
+		concurrency:  concurrency,
+		rate:         rate,
+		results:      make(chan Sample, 10000),
+		rng:          rand.New(rand.NewSource(time.Now().UnixNano())),
+		timingReplay: nil,
 	}
+}
+
+// SetTimingReplay sets the timing replay for realistic workload pacing.
+func (r *Runner) SetTimingReplay(tr *TimingReplay) {
+	r.timingReplay = tr
 }
 
 // Results returns the channel for receiving benchmark samples.
@@ -64,6 +71,18 @@ func (r *Runner) balanceWorker(ctx context.Context, wg *sync.WaitGroup) {
 		case <-ctx.Done():
 			return
 		default:
+			// Apply timing replay delay if configured
+			if r.timingReplay != nil {
+				delay := r.timingReplay.NextDelay()
+				if delay > 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(delay):
+					}
+				}
+			}
+
 			accountID := r.randomAccount()
 			start := time.Now()
 			err := r.client.GetBalance(ctx, accountID)

@@ -52,7 +52,7 @@ Phase 2b results (run_id: 43):
 Phase 2 clients:
   ✅ Python grpcio     → local gRPC server
   ✅ Python Hedera SDK → Hedera testnet
-  ⬚ Rust/tonic        → planned
+  ✅ Rust/tonic        → local gRPC + REST servers
 ```
 
 ---
@@ -76,11 +76,16 @@ grpc-rest-benchmark/
 │       ├── benchmark.pb.go       # Generated
 │       └── benchmark_grpc.pb.go  # Generated
 ├── clients/
-│   └── python/
-│       ├── grpc_client.py        # Python gRPC benchmark client
-│       ├── sdk_client.py         # Python Hedera SDK benchmark client
-│       ├── requirements.txt      # grpcio, psycopg, hiero-sdk-python
-│       └── generate_proto.sh     # Proto stub generation
+│   ├── python/
+│   │   ├── grpc_client.py        # Python gRPC benchmark client
+│   │   ├── sdk_client.py         # Python Hedera SDK benchmark client
+│   │   ├── requirements.txt      # grpcio, psycopg, hiero-sdk-python
+│   │   └── generate_proto.sh     # Proto stub generation
+│   └── rust/
+│       ├── src/main.rs           # Rust benchmark client (tonic + reqwest)
+│       ├── proto/benchmark.proto # Proto definition for tonic-build
+│       ├── Cargo.toml            # Dependencies
+│       └── build.rs              # Proto compilation
 ├── migrations/
 │   ├── 001_init.sql              # Schema: accounts, transactions, benchmark tables
 │   └── 002_add_client_column.sql # Adds client column for multi-language tracking
@@ -143,17 +148,20 @@ Goal: measure SDK abstraction overhead vs raw transport across languages. All cl
 - ✅ Python clients: use `psutil` via shared `resources.py` module
 - ⬚ Rust client: will use appropriate crate when implemented
 
-### 2d. Realistic workload replay
-- HCS API docs: https://docs.hedera.com/hedera/sdks-and-apis/hedera-consensus-service-api
-- Replace synthetic uniform-random seed data with replayed HCS topic timing patterns
-- **Location:** `scripts/replay_seed.go` or `scripts/replay_seed.py`
-- Source: pull timing distribution from a public HCS topic, replay at 1x speed
+### 2d. Realistic workload replay ✅ Complete
+- **Location:** `scripts/fetch_hcs_timing.py` (fetcher) + `cmd/benchmark/timing.go` (replay)
+- Fetches timing distribution from public HCS topics via Mirror Node REST API
+- Replay modes: `sequential` (exact order) or `sample` (random sampling)
+- Speedup factor support (e.g., `--replay-speedup=10` for 10x faster)
+- CLI: `--replay-timing=timing.json --replay-mode=sample --replay-speedup=10`
 
-### 2e. Rust client using `tonic`
+### 2e. Rust client using `tonic` ✅ Complete
 - **Location:** `clients/rust/src/main.rs`
-- Implement balance query scenario first, stretch to streaming
-- Use `tonic` for gRPC, `reqwest` for REST baseline
-- Same CLI flags pattern as Go benchmark runner
+- Implements balance query (gRPC + REST) and streaming (gRPC only)
+- Uses `tonic` for gRPC, `reqwest` for REST
+- CPU/memory profiling via `sysinfo` crate
+- Results stored with `client=rust-grpc` or `client=rust-rest`
+- Run: `make rust-benchmark ARGS="--scenario=balance --protocol=grpc --duration=30s"`
 
 ### 2f. Unit tests
 - `pkg/db/*_test.go` — test query functions against a test DB

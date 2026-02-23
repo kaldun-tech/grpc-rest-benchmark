@@ -47,3 +47,6 @@ __pycache__/
 
 # Generated protobuf code (Python)
 clients/python/proto/
+
+# Rust
+clients/rust/target/

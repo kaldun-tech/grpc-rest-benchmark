@@ -37,7 +37,13 @@
       "Bash(go run:*)",
       "Bash(pip install:*)",
       "Bash(./generate_proto.sh:*)",
-      "Bash(git check-ignore:*)"
+      "Bash(git check-ignore:*)",
+      "WebFetch(domain:mainnet-public.mirrornode.hedera.com)",
+      "WebFetch(domain:docs.hedera.com)",
+      "Bash(pgrep:*)",
+      "Bash(curl:*)",
+      "Bash(cargo build:*)",
+      "Bash(./clients/rust/target/release/benchmark_client:*)"
     ]
   }
 }

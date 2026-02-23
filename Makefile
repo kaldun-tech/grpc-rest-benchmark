@@ -1,6 +1,8 @@
 .PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers \
         benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest \
-        python-deps python-proto python-benchmark python-sdk-benchmark migrate
+        python-deps python-proto python-benchmark python-sdk-benchmark migrate \
+        fetch-hcs-timing benchmark-replay \
+        rust-build rust-benchmark
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -77,8 +79,32 @@ python-benchmark: python-proto
 python-sdk-benchmark: python-deps
 	python clients/python/sdk_client.py $(ARGS)
 
+# HCS timing fetch (Phase 2d) - fetch timing distribution from Hedera topic
+# Usage: make fetch-hcs-timing TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000
+TOPIC ?= 0.0.120438
+NETWORK ?= mainnet
+LIMIT ?= 1000
+fetch-hcs-timing:
+	python3 scripts/fetch_hcs_timing.py --topic=$(TOPIC) --network=$(NETWORK) --limit=$(LIMIT) --output=timing.json
+
+# Run benchmark with HCS timing replay (Phase 2d)
+# Usage: make benchmark-replay TIMING=timing.json ARGS="--protocol=grpc --concurrency=10"
+TIMING ?= timing.json
+SPEEDUP ?= 1.0
+benchmark-replay:
+	go run cmd/benchmark/*.go --scenario=balance --replay-timing=$(TIMING) --replay-speedup=$(SPEEDUP) $(ARGS)
+
+# Rust client targets (Phase 2e)
+rust-build:
+	cd clients/rust && cargo build --release
+
+rust-benchmark: rust-build
+	./clients/rust/target/release/benchmark_client $(ARGS)
+
 # Clean up: stop containers, remove volumes, delete generated code
 clean:
 	docker-compose down -v
 	rm -f pkg/protos/*.pb.go
 	rm -rf clients/python/proto
+	rm -rf clients/rust/target
+	rm -f timing.json

@@ -23,6 +23,11 @@ func main() {
 	grpcAddr := flag.String("grpc-addr", "localhost:50051", "gRPC server address")
 	restAddr := flag.String("rest-addr", "http://localhost:8080", "REST server address")
 
+	// Timing replay flags (Phase 2d)
+	replayTiming := flag.String("replay-timing", "", "Path to HCS timing JSON file for realistic workload replay")
+	replayMode := flag.String("replay-mode", "sample", "Replay mode: sequential | sample")
+	replaySpeedup := flag.Float64("replay-speedup", 1.0, "Speedup factor for replay (1.0 = real-time, 10.0 = 10x faster)")
+
 	// Database flags
 	dbHost := flag.String("db-host", "localhost", "PostgreSQL host")
 	dbPort := flag.Int("db-port", 5432, "PostgreSQL port")
@@ -109,6 +114,18 @@ func main() {
 	// Create runner
 	runner := NewRunner(client, accountIDs, *concurrency, *rate)
 
+	// Load timing replay if specified
+	if *replayTiming != "" {
+		timingData, err := LoadTimingData(*replayTiming)
+		if err != nil {
+			log.Fatalf("Failed to load timing data: %v", err)
+		}
+		tr := NewTimingReplay(timingData, *replayMode, *replaySpeedup)
+		runner.SetTimingReplay(tr)
+		tr.PrintSummary()
+		fmt.Println()
+	}
+
 	// Setup results collector
 	results := NewResults()
 
@@ -128,7 +145,10 @@ func main() {
 	if *scenario == "stream" && *rate > 0 {
 		fmt.Printf(" | Rate limit: %d events/s", *rate)
 	}
-	fmt.Println("\n")
+	if *replayTiming != "" {
+		fmt.Printf(" | Replay: %s (%.1fx)", *replayMode, *replaySpeedup)
+	}
+	fmt.Println()
 
 	// Start resource monitoring
 	var stopResourceMonitor func() ResourceStats
