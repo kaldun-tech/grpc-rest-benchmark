@@ -16,11 +16,11 @@ from threading import Event, Lock
 from typing import Optional
 
 import grpc
-import psycopg
 
 # Generated proto imports (run generate_proto.sh first)
 from proto import benchmark_pb2, benchmark_pb2_grpc
 from resources import ResourceMonitor, ResourceStats
+from database import Database, DBConfig, load_account_ids
 
 
 @dataclass
@@ -130,7 +130,7 @@ class Results:
 
     def store_results(
         self,
-        conn: psycopg.Connection,
+        db: Database,
         scenario: str,
         protocol: str,
         client: str,
@@ -138,53 +138,54 @@ class Results:
         rate_limit: Optional[int],
     ):
         """Save benchmark results to PostgreSQL."""
-        with conn.cursor() as cur:
-            # Insert benchmark run with resource stats
-            cpu_avg = self.resource_stats.cpu_avg_percent if self.resource_stats else None
-            mem_avg = self.resource_stats.memory_avg_mb if self.resource_stats else None
-            mem_peak = self.resource_stats.memory_peak_mb if self.resource_stats else None
+        with db.get_connection() as conn:
+            with conn.cursor() as cur:
+                # Insert benchmark run with resource stats
+                cpu_avg = self.resource_stats.cpu_avg_percent if self.resource_stats else None
+                mem_avg = self.resource_stats.memory_avg_mb if self.resource_stats else None
+                mem_peak = self.resource_stats.memory_peak_mb if self.resource_stats else None
 
-            cur.execute(
-                """
-                INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit,
-                                            cpu_usage_avg, memory_mb_avg, memory_mb_peak)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (scenario, protocol, client, concurrency, int(self.duration_seconds), rate_limit,
-                 cpu_avg, mem_avg, mem_peak),
-            )
-            run_id = cur.fetchone()[0]
+                cur.execute(
+                    """
+                    INSERT INTO benchmark_runs (scenario, protocol, client, concurrency, duration_sec, rate_limit,
+                                                cpu_usage_avg, memory_mb_avg, memory_mb_peak)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                    """,
+                    (scenario, protocol, client, concurrency, int(self.duration_seconds), rate_limit,
+                     cpu_avg, mem_avg, mem_peak),
+                )
+                run_id = cur.fetchone()[0]
 
-            # Batch insert samples using COPY
-            with cur.copy(
-                "COPY benchmark_samples (run_id, latency_ms, success, error_type, timestamp) FROM STDIN"
-            ) as copy:
-                for sample in self.samples:
-                    copy.write_row((
-                        run_id,
-                        sample.latency_ms,
-                        sample.success,
-                        sample.error,
-                        sample.timestamp,
-                    ))
+                # Batch insert samples using COPY
+                with cur.copy(
+                    "COPY benchmark_samples (run_id, latency_ms, success, error_type, timestamp) FROM STDIN"
+                ) as copy:
+                    for sample in self.samples:
+                        copy.write_row((
+                            run_id,
+                            sample.latency_ms,
+                            sample.success,
+                            sample.error,
+                            sample.timestamp,
+                        ))
 
-            conn.commit()
-            print(f"Results saved to database (run_id: {run_id})")
+                conn.commit()
+                print(f"Results saved to database (run_id: {run_id})")
 
-            # Retrieve stats from view
-            cur.execute(
-                """
-                SELECT p50_latency, p90_latency, p99_latency
-                FROM benchmark_stats
-                WHERE run_id = %s
-                """,
-                (run_id,),
-            )
-            row = cur.fetchone()
-            if row:
-                print(f"\nDatabase stats (from benchmark_stats view):")
-                print(f"  p50: {row[0]:.2f}ms, p90: {row[1]:.2f}ms, p99: {row[2]:.2f}ms")
+                # Retrieve stats from view
+                cur.execute(
+                    """
+                    SELECT p50_latency, p90_latency, p99_latency
+                    FROM benchmark_stats
+                    WHERE run_id = %s
+                    """,
+                    (run_id,),
+                )
+                row = cur.fetchone()
+                if row:
+                    print(f"\nDatabase stats (from benchmark_stats view):")
+                    print(f"  p50: {row[0]:.2f}ms, p90: {row[1]:.2f}ms, p99: {row[2]:.2f}ms")
 
 
 class GRPCBenchmarkClient:
@@ -324,13 +325,6 @@ class Runner:
         self.results.set_end_time(datetime.now())
 
 
-def load_account_ids(conn: psycopg.Connection) -> list[str]:
-    """Load all account IDs from the database."""
-    with conn.cursor() as cur:
-        cur.execute("SELECT account_id FROM accounts")
-        return [row[0] for row in cur.fetchall()]
-
-
 def main():
     parser = argparse.ArgumentParser(description="Python gRPC benchmark client")
     parser.add_argument("--scenario", default="balance", choices=["balance", "stream"],
@@ -353,16 +347,23 @@ def main():
 
     args = parser.parse_args()
 
-    # Connect to database
-    conn_str = f"host={args.db_host} port={args.db_port} user={args.db_user} password={args.db_pass} dbname={args.db_name}"
-    conn = psycopg.connect(conn_str)
-    print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port}")
+    # Connect to database with pooling
+    db_config = DBConfig(
+        host=args.db_host,
+        port=args.db_port,
+        user=args.db_user,
+        password=args.db_pass,
+        database=args.db_name,
+    )
+    db = Database(db_config)
+    db.connect()
+    print(f"Connected to database {args.db_name}@{args.db_host}:{args.db_port} (pooled)")
 
     # Load account IDs for balance scenario
     account_ids = []
     if args.scenario == "balance":
         print("Loading account IDs from database...")
-        account_ids = load_account_ids(conn)
+        account_ids = load_account_ids(db)
         if not account_ids:
             print("No accounts found in database. Run 'make seed' first.")
             sys.exit(1)
@@ -408,7 +409,7 @@ def main():
 
     rate_limit = args.rate if args.scenario == "stream" and args.rate > 0 else None
     runner.results.store_results(
-        conn,
+        db,
         scenario=args.scenario,
         protocol="grpc",
         client="python-grpc",
@@ -417,7 +418,7 @@ def main():
     )
 
     client.close()
-    conn.close()
+    db.close()
 
 
 if __name__ == "__main__":
