@@ -261,3 +261,99 @@ func TestGetStats(t *testing.T) {
 	// Clean up
 	_, _ = db.Pool.Exec(ctx, "DELETE FROM benchmark_runs WHERE id = $1", runID)
 }
+
+func TestGetFilteredStats(t *testing.T) {
+	db := testDB(t)
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Create two runs with different protocols
+	run1 := &BenchmarkRun{
+		Scenario:    "balance",
+		Protocol:    "grpc",
+		Client:      "go-test",
+		Concurrency: 10,
+		DurationSec: 5,
+	}
+	run2 := &BenchmarkRun{
+		Scenario:    "balance",
+		Protocol:    "rest",
+		Client:      "go-test",
+		Concurrency: 10,
+		DurationSec: 5,
+	}
+
+	runID1, err := db.RecordRun(ctx, run1)
+	if err != nil {
+		t.Fatalf("RecordRun() error = %v", err)
+	}
+	runID2, err := db.RecordRun(ctx, run2)
+	if err != nil {
+		t.Fatalf("RecordRun() error = %v", err)
+	}
+
+	// Add samples to both runs
+	now := time.Now()
+	for _, runID := range []int64{runID1, runID2} {
+		samples := make([]*BenchmarkSample, 10)
+		for i := range samples {
+			samples[i] = &BenchmarkSample{
+				RunID:     runID,
+				LatencyMs: float64(i + 1),
+				Success:   true,
+				Timestamp: now.Add(time.Duration(i) * time.Millisecond),
+			}
+		}
+		if err := db.RecordSamples(ctx, samples); err != nil {
+			t.Fatalf("RecordSamples() error = %v", err)
+		}
+	}
+
+	// Test filtering by protocol
+	filter := StatsFilter{Protocol: "grpc"}
+	stats, err := db.GetFilteredStats(ctx, filter)
+	if err != nil {
+		t.Fatalf("GetFilteredStats() error = %v", err)
+	}
+
+	// Should find at least the grpc run we created
+	found := false
+	for _, s := range stats {
+		if s.RunID == runID1 && s.Protocol == "grpc" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("GetFilteredStats(protocol=grpc) did not return expected run")
+	}
+
+	// Test filtering by run_id
+	filter2 := StatsFilter{RunID: &runID2}
+	stats2, err := db.GetFilteredStats(ctx, filter2)
+	if err != nil {
+		t.Fatalf("GetFilteredStats() error = %v", err)
+	}
+	if len(stats2) != 1 {
+		t.Errorf("GetFilteredStats(run_id=%d) returned %d results, want 1", runID2, len(stats2))
+	}
+	if len(stats2) > 0 && stats2[0].RunID != runID2 {
+		t.Errorf("GetFilteredStats(run_id=%d) returned run_id=%d", runID2, stats2[0].RunID)
+	}
+
+	// Test limit
+	filter3 := StatsFilter{Limit: 1}
+	stats3, err := db.GetFilteredStats(ctx, filter3)
+	if err != nil {
+		t.Fatalf("GetFilteredStats() error = %v", err)
+	}
+	if len(stats3) > 1 {
+		t.Errorf("GetFilteredStats(limit=1) returned %d results, want <= 1", len(stats3))
+	}
+
+	// Clean up
+	_, _ = db.Pool.Exec(ctx, "DELETE FROM benchmark_runs WHERE id = $1", runID1)
+	_, _ = db.Pool.Exec(ctx, "DELETE FROM benchmark_runs WHERE id = $1", runID2)
+}

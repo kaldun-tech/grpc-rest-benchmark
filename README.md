@@ -78,6 +78,64 @@ Server-side streaming pattern simulating real-time transaction event feeds.
 └── scripts/             # Seed data generation
 ```
 
+## Dashboard
+
+The REST server includes a web dashboard for visualizing benchmark results.
+
+```bash
+# Start the REST server
+make rest-server
+
+# Open dashboard in browser
+open http://localhost:8080/
+```
+
+Features:
+- **Latency distribution charts** — p50/p90/p99 comparison across protocols and clients
+- **Throughput comparison** — req/s bar charts
+- **Filter controls** — filter by scenario, protocol, client
+- **Results table** — detailed view of all benchmark runs
+
+## Results API
+
+Query benchmark results programmatically:
+
+```bash
+# Get all results
+curl http://localhost:8080/api/v1/results
+
+# Filter by scenario
+curl "http://localhost:8080/api/v1/results?scenario=balance_query"
+
+# Filter by protocol and client
+curl "http://localhost:8080/api/v1/results?protocol=grpc&client=go"
+
+# Get specific run
+curl "http://localhost:8080/api/v1/results?run_id=42"
+```
+
+Response format:
+```json
+{
+  "results": [
+    {
+      "run_id": 42,
+      "scenario": "balance_query",
+      "protocol": "grpc",
+      "client": "go",
+      "concurrency": 50,
+      "throughput": 3245.67,
+      "p50_latency_ms": 12.5,
+      "p90_latency_ms": 18.2,
+      "p99_latency_ms": 25.8,
+      "total_samples": 97370,
+      "successful": 97370
+    }
+  ],
+  "count": 1
+}
+```
+
 ## Metrics Collected
 
 - **Latency:** p50, p90, p99, min, max, average

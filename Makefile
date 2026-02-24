@@ -3,7 +3,8 @@
         python-deps python-proto python-benchmark python-sdk-benchmark migrate \
         fetch-hcs-timing benchmark-replay \
         rust-build rust-benchmark \
-        test test-db test-benchmark
+        test test-db test-benchmark \
+        dashboard-check api-check
 
 # Generate Go code from Protocol Buffers
 proto:
@@ -111,6 +112,14 @@ test-db: db-up
 
 test-benchmark:
 	go test ./cmd/benchmark/... -v -count=1
+
+# Dashboard check (Phase 3)
+dashboard-check:
+	@curl -s http://localhost:8080/ | grep -q "gRPC vs REST" && echo "Dashboard OK" || echo "Dashboard not running"
+
+# Results API check (Phase 3)
+api-check:
+	@curl -s http://localhost:8080/api/v1/results | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'Results API OK: {d[\"count\"]} results')"
 
 # Clean up: stop containers, remove volumes, delete generated code
 clean:

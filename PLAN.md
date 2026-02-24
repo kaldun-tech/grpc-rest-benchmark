@@ -86,9 +86,18 @@ grpc-rest-benchmark/
 │       ├── proto/benchmark.proto # Proto definition for tonic-build
 │       ├── Cargo.toml            # Dependencies
 │       └── build.rs              # Proto compilation
+├── web/
+│   ├── embed.go                  # Go embed directive for static files
+│   ├── index.html                # Dashboard HTML
+│   ├── dashboard.js              # Chart.js rendering logic
+│   └── style.css                 # Dashboard styling
+├── docs/
+│   └── blog-post.md              # Blog post draft
 ├── migrations/
 │   ├── 001_init.sql              # Schema: accounts, transactions, benchmark tables
-│   └── 002_add_client_column.sql # Adds client column for multi-language tracking
+│   ├── 002_add_client_column.sql # Adds client column for multi-language tracking
+│   ├── 003_add_resource_columns.sql # Adds CPU/memory metrics
+│   └── 004_add_duration_to_stats.sql # Adds duration_sec to stats view
 ├── scripts/seed_data.sql         # 10K accounts, 100K transactions
 ├── docker-compose.yml            # PostgreSQL 16
 └── Makefile                      # proto, seed, python-benchmark, etc.
@@ -177,14 +186,46 @@ Goal: measure SDK abstraction overhead vs raw transport across languages. All cl
 
 ---
 
-## Phase 3: Dashboard & Docs 📋 PLANNED
+## Phase 3: Dashboard & Docs ✅ Complete
 
-- Single-page HTML + Chart.js dashboard reading from PostgreSQL
-  - Latency distribution charts (p50/p90/p99 per protocol/language)
-  - Throughput comparison bar charts
-- Results API endpoint (`GET /api/v1/results?scenario=balance&run_id=...`)
-- README with setup instructions and results summary
-- Blog post: "When should you use gRPC? Here's the data"
+### 3a. Results API ✅ Complete
+- **Endpoint:** `GET /api/v1/results?scenario=...&protocol=...&client=...&run_id=...`
+- **Location:** `cmd/rest-server/main.go` (`handleResults`)
+- Returns JSON with throughput, latency percentiles, resource metrics
+- Supports filtering by scenario, protocol, client, run_id
+
+### 3b. Web Dashboard ✅ Complete
+- **Location:** `web/index.html`, `web/dashboard.js`, `web/style.css`
+- Single-page HTML + Chart.js dashboard
+- Latency distribution charts (p50/p90/p99 per protocol/client)
+- Throughput comparison bar charts
+- Filter controls and results table
+- Access: http://localhost:8080/ (when REST server is running)
+
+### 3c. Documentation ✅ Complete
+- **README.md:** Updated with Dashboard and API documentation
+- **Blog post:** `docs/blog-post.md` — "When Should You Use gRPC? Here's the Data"
+
+### 3d. Database Migration ✅ Complete
+- **Migration 004:** Adds `duration_sec` to `benchmark_stats` view for throughput calculation
+- Run: `make migrate`
+
+### Verification
+```bash
+# Apply migration
+make migrate
+
+# Start REST server
+make rest-server
+
+# Check dashboard
+open http://localhost:8080/
+
+# Check API
+curl http://localhost:8080/api/v1/results
+make api-check
+make dashboard-check
+```
 
 ---
 

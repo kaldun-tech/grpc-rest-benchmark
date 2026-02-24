@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>gRPC vs REST Benchmark Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>gRPC vs REST Performance Benchmark</h1>
+        <div id="filters">
+            <label>
+                Scenario:
+                <select id="scenario-filter">
+                    <option value="">All</option>
+                    <option value="balance_query">Balance Query</option>
+                    <option value="tx_stream">Transaction Stream</option>
+                </select>
+            </label>
+            <label>
+                Protocol:
+                <select id="protocol-filter">
+                    <option value="">All</option>
+                    <option value="grpc">gRPC</option>
+                    <option value="rest">REST</option>
+                </select>
+            </label>
+            <label>
+                Client:
+                <select id="client-filter">
+                    <option value="">All</option>
+                    <option value="go">Go</option>
+                    <option value="python-grpc">Python gRPC</option>
+                    <option value="python-sdk">Python SDK</option>
+                    <option value="rust">Rust</option>
+                </select>
+            </label>
+            <button id="refresh-btn">Refresh</button>
+        </div>
+    </header>
+
+    <main>
+        <section id="summary">
+            <h2>Summary</h2>
+            <div id="summary-stats">
+                <div class="stat-card">
+                    <span class="stat-value" id="total-runs">-</span>
+                    <span class="stat-label">Total Runs</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="best-throughput">-</span>
+                    <span class="stat-label">Best Throughput (req/s)</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-value" id="best-latency">-</span>
+                    <span class="stat-label">Best p99 Latency (ms)</span>
+                </div>
+            </div>
+        </section>
+
+        <section id="charts">
+            <div class="chart-container">
+                <h2>Latency Distribution (ms)</h2>
+                <canvas id="latency-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2>Throughput Comparison (req/s)</h2>
+                <canvas id="throughput-chart"></canvas>
+            </div>
+        </section>
+
+        <section id="results-section">
+            <h2>Benchmark Results</h2>
+            <table id="results-table">
+                <thead>
+                    <tr>
+                        <th>Run ID</th>
+                        <th>Scenario</th>
+                        <th>Protocol</th>
+                        <th>Client</th>
+                        <th>Concurrency</th>
+                        <th>Throughput</th>
+                        <th>p50</th>
+                        <th>p90</th>
+                        <th>p99</th>
+                        <th>Success Rate</th>
+                    </tr>
+                </thead>
+                <tbody id="results-body">
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <footer>
+        <p>gRPC vs REST Benchmark Dashboard</p>
+    </footer>
+
+    <script src="dashboard.js"></script>
+</body>
+</html>

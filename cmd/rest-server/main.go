@@ -5,15 +5,18 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/kaldun-tech/grpc-rest-benchmark/pkg/db"
+	"github.com/kaldun-tech/grpc-rest-benchmark/web"
 )
 
 var (
@@ -57,6 +60,34 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// BenchmarkResult is a single benchmark result for the API.
+type BenchmarkResult struct {
+	RunID        int64    `json:"run_id"`
+	Scenario     string   `json:"scenario"`
+	Protocol     string   `json:"protocol"`
+	Client       string   `json:"client"`
+	Concurrency  int      `json:"concurrency"`
+	DurationSec  int      `json:"duration_sec"`
+	TotalSamples int64    `json:"total_samples"`
+	Successful   int64    `json:"successful"`
+	Throughput   float64  `json:"throughput"`
+	P50Latency   float64  `json:"p50_latency_ms"`
+	P90Latency   float64  `json:"p90_latency_ms"`
+	P99Latency   float64  `json:"p99_latency_ms"`
+	AvgLatency   float64  `json:"avg_latency_ms"`
+	MinLatency   float64  `json:"min_latency_ms"`
+	MaxLatency   float64  `json:"max_latency_ms"`
+	CPUUsageAvg  *float64 `json:"cpu_usage_avg,omitempty"`
+	MemoryMBAvg  *float64 `json:"memory_mb_avg,omitempty"`
+	MemoryMBPeak *float64 `json:"memory_mb_peak,omitempty"`
+}
+
+// ResultsResponse is the JSON response for benchmark results.
+type ResultsResponse struct {
+	Results []BenchmarkResult `json:"results"`
+	Count   int               `json:"count"`
+}
+
 func main() {
 	flag.Parse()
 
@@ -91,6 +122,16 @@ func main() {
 
 	// Health check
 	mux.HandleFunc("/health", server.handleHealth)
+
+	// Benchmark results
+	mux.HandleFunc("/api/v1/results", server.handleResults)
+
+	// Static files (dashboard)
+	staticFS, err := fs.Sub(web.Content, ".")
+	if err != nil {
+		log.Fatalf("Failed to setup static files: %v", err)
+	}
+	mux.Handle("/", http.FileServer(http.FS(staticFS)))
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", *port)
@@ -290,6 +331,75 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "healthy"})
+}
+
+// handleResults handles GET /api/v1/results?scenario=...&protocol=...&client=...&run_id=...
+func (s *Server) handleResults(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeError(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Parse query parameters into filter
+	filter := db.StatsFilter{
+		Scenario: r.URL.Query().Get("scenario"),
+		Protocol: r.URL.Query().Get("protocol"),
+		Client:   r.URL.Query().Get("client"),
+		Limit:    100,
+	}
+
+	if runIDStr := r.URL.Query().Get("run_id"); runIDStr != "" {
+		if runID, err := strconv.ParseInt(runIDStr, 10, 64); err == nil {
+			filter.RunID = &runID
+		}
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil && limit > 0 {
+			filter.Limit = limit
+		}
+	}
+
+	stats, err := s.db.GetFilteredStats(r.Context(), filter)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to get results: %v", err))
+		return
+	}
+
+	// Convert to API response format with throughput calculation
+	results := make([]BenchmarkResult, len(stats))
+	for i, stat := range stats {
+		throughput := 0.0
+		if stat.DurationSec > 0 {
+			throughput = float64(stat.TotalSamples) / float64(stat.DurationSec)
+		}
+
+		results[i] = BenchmarkResult{
+			RunID:        stat.RunID,
+			Scenario:     stat.Scenario,
+			Protocol:     stat.Protocol,
+			Client:       stat.Client,
+			Concurrency:  stat.Concurrency,
+			DurationSec:  stat.DurationSec,
+			TotalSamples: stat.TotalSamples,
+			Successful:   stat.Successful,
+			Throughput:   throughput,
+			P50Latency:   stat.P50Latency,
+			P90Latency:   stat.P90Latency,
+			P99Latency:   stat.P99Latency,
+			AvgLatency:   stat.AvgLatency,
+			MinLatency:   stat.MinLatency,
+			MaxLatency:   stat.MaxLatency,
+			CPUUsageAvg:  stat.CPUUsageAvg,
+			MemoryMBAvg:  stat.MemoryMBAvg,
+			MemoryMBPeak: stat.MemoryMBPeak,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, ResultsResponse{
+		Results: results,
+		Count:   len(results),
+	})
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

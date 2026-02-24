@@ -42,6 +42,7 @@ type BenchmarkStats struct {
 	Protocol     string
 	Client       string
 	Concurrency  int
+	DurationSec  int
 	TotalSamples int64
 	Successful   int64
 	P50Latency   float64
@@ -50,6 +51,18 @@ type BenchmarkStats struct {
 	AvgLatency   float64
 	MinLatency   float64
 	MaxLatency   float64
+	CPUUsageAvg  *float64
+	MemoryMBAvg  *float64
+	MemoryMBPeak *float64
+}
+
+// StatsFilter defines filter criteria for querying benchmark stats.
+type StatsFilter struct {
+	Scenario string
+	Protocol string
+	Client   string
+	RunID    *int64
+	Limit    int
 }
 
 // RecordRun creates a new benchmark run record and returns its ID.
@@ -129,16 +142,19 @@ func (db *DB) RecordSamples(ctx context.Context, samples []*BenchmarkSample) err
 func (db *DB) GetStats(ctx context.Context, runID int64) (*BenchmarkStats, error) {
 	var stats BenchmarkStats
 	err := db.Pool.QueryRow(ctx,
-		`SELECT run_id, scenario, protocol, client, concurrency, total_samples, successful,
-		        p50_latency, p90_latency, p99_latency, avg_latency, min_latency, max_latency
+		`SELECT run_id, scenario, protocol, client, concurrency, duration_sec,
+		        total_samples, successful,
+		        p50_latency, p90_latency, p99_latency, avg_latency, min_latency, max_latency,
+		        cpu_usage_avg, memory_mb_avg, memory_mb_peak
 		 FROM benchmark_stats
 		 WHERE run_id = $1`,
 		runID,
 	).Scan(
 		&stats.RunID, &stats.Scenario, &stats.Protocol, &stats.Client, &stats.Concurrency,
-		&stats.TotalSamples, &stats.Successful,
+		&stats.DurationSec, &stats.TotalSamples, &stats.Successful,
 		&stats.P50Latency, &stats.P90Latency, &stats.P99Latency,
 		&stats.AvgLatency, &stats.MinLatency, &stats.MaxLatency,
+		&stats.CPUUsageAvg, &stats.MemoryMBAvg, &stats.MemoryMBPeak,
 	)
 
 	if err != nil {
@@ -151,8 +167,10 @@ func (db *DB) GetStats(ctx context.Context, runID int64) (*BenchmarkStats, error
 // GetAllStats retrieves stats for all benchmark runs.
 func (db *DB) GetAllStats(ctx context.Context) ([]*BenchmarkStats, error) {
 	rows, err := db.Pool.Query(ctx,
-		`SELECT run_id, scenario, protocol, client, concurrency, total_samples, successful,
-		        p50_latency, p90_latency, p99_latency, avg_latency, min_latency, max_latency
+		`SELECT run_id, scenario, protocol, client, concurrency, duration_sec,
+		        total_samples, successful,
+		        p50_latency, p90_latency, p99_latency, avg_latency, min_latency, max_latency,
+		        cpu_usage_avg, memory_mb_avg, memory_mb_peak
 		 FROM benchmark_stats
 		 ORDER BY run_id DESC`,
 	)
@@ -166,9 +184,78 @@ func (db *DB) GetAllStats(ctx context.Context) ([]*BenchmarkStats, error) {
 		var stats BenchmarkStats
 		if err := rows.Scan(
 			&stats.RunID, &stats.Scenario, &stats.Protocol, &stats.Client, &stats.Concurrency,
-			&stats.TotalSamples, &stats.Successful,
+			&stats.DurationSec, &stats.TotalSamples, &stats.Successful,
 			&stats.P50Latency, &stats.P90Latency, &stats.P99Latency,
 			&stats.AvgLatency, &stats.MinLatency, &stats.MaxLatency,
+			&stats.CPUUsageAvg, &stats.MemoryMBAvg, &stats.MemoryMBPeak,
+		); err != nil {
+			return nil, fmt.Errorf("failed to scan stats row: %w", err)
+		}
+		allStats = append(allStats, &stats)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating stats rows: %w", err)
+	}
+
+	return allStats, nil
+}
+
+// GetFilteredStats retrieves stats with optional filtering.
+func (db *DB) GetFilteredStats(ctx context.Context, filter StatsFilter) ([]*BenchmarkStats, error) {
+	query := `SELECT run_id, scenario, protocol, client, concurrency, duration_sec,
+	                 total_samples, successful,
+	                 p50_latency, p90_latency, p99_latency, avg_latency, min_latency, max_latency,
+	                 cpu_usage_avg, memory_mb_avg, memory_mb_peak
+	          FROM benchmark_stats
+	          WHERE 1=1`
+
+	args := []interface{}{}
+	argIdx := 1
+
+	if filter.RunID != nil {
+		query += fmt.Sprintf(" AND run_id = $%d", argIdx)
+		args = append(args, *filter.RunID)
+		argIdx++
+	}
+	if filter.Scenario != "" {
+		query += fmt.Sprintf(" AND scenario = $%d", argIdx)
+		args = append(args, filter.Scenario)
+		argIdx++
+	}
+	if filter.Protocol != "" {
+		query += fmt.Sprintf(" AND protocol = $%d", argIdx)
+		args = append(args, filter.Protocol)
+		argIdx++
+	}
+	if filter.Client != "" {
+		query += fmt.Sprintf(" AND client = $%d", argIdx)
+		args = append(args, filter.Client)
+		argIdx++
+	}
+
+	query += " ORDER BY run_id DESC"
+
+	if filter.Limit > 0 {
+		query += fmt.Sprintf(" LIMIT $%d", argIdx)
+		args = append(args, filter.Limit)
+	}
+
+	rows, err := db.Pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query filtered stats: %w", err)
+	}
+	defer rows.Close()
+
+	var allStats []*BenchmarkStats
+	for rows.Next() {
+		var stats BenchmarkStats
+		if err := rows.Scan(
+			&stats.RunID, &stats.Scenario, &stats.Protocol, &stats.Client, &stats.Concurrency,
+			&stats.DurationSec, &stats.TotalSamples, &stats.Successful,
+			&stats.P50Latency, &stats.P90Latency, &stats.P99Latency,
+			&stats.AvgLatency, &stats.MinLatency, &stats.MaxLatency,
+			&stats.CPUUsageAvg, &stats.MemoryMBAvg, &stats.MemoryMBPeak,
 		); err != nil {
 			return nil, fmt.Errorf("failed to scan stats row: %w", err)
 		}

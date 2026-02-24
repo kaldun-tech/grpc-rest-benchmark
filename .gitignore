@@ -39,6 +39,8 @@ docker-compose.override.yml
 benchmark_results/
 bin/
 /benchmark
+/rest-server
+/grpc-server
 
 # Python
 venv/
