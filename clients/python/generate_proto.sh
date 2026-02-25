@@ -7,9 +7,12 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROTO_DIR="$SCRIPT_DIR/../../pkg/protos"
 OUT_DIR="$SCRIPT_DIR/proto"
 
+# Use PYTHON env var if set, otherwise fall back to python3
+PYTHON="${PYTHON:-python3}"
+
 mkdir -p "$OUT_DIR"
 
-python -m grpc_tools.protoc \
+"$PYTHON" -m grpc_tools.protoc \
     -I "$PROTO_DIR" \
     --python_out="$OUT_DIR" \
     --grpc_python_out="$OUT_DIR" \

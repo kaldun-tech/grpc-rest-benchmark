@@ -1,4 +1,4 @@
-.PHONY: proto seed benchmark clean db-up db-down grpc-server rest-server servers \
+.PHONY: proto seed benchmark go-benchmark clean db-up db-down grpc-server rest-server servers \
         benchmark-balance-grpc benchmark-balance-rest benchmark-stream-grpc benchmark-stream-rest \
         python-deps python-proto python-benchmark python-sdk-benchmark migrate \
         fetch-hcs-timing benchmark-replay \
@@ -44,21 +44,22 @@ servers: db-up
 	@echo "Both servers running. Use 'pkill -f cmd/..-server' to stop."
 
 # Run benchmarks (use ARGS to pass flags, e.g.: make benchmark ARGS="--scenario=balance --protocol=grpc")
-benchmark:
-	go run cmd/benchmark/*.go $(ARGS)
+# Alias: go-benchmark
+benchmark go-benchmark:
+	go run ./cmd/benchmark $(ARGS)
 
 # Quick benchmark examples
 benchmark-balance-grpc:
-	go run cmd/benchmark/*.go --scenario=balance --protocol=grpc --duration=10s --concurrency=10
+	go run ./cmd/benchmark --scenario=balance --protocol=grpc --duration=10s --concurrency=10
 
 benchmark-balance-rest:
-	go run cmd/benchmark/*.go --scenario=balance --protocol=rest --duration=10s --concurrency=10
+	go run ./cmd/benchmark --scenario=balance --protocol=rest --duration=10s --concurrency=10
 
 benchmark-stream-grpc:
-	go run cmd/benchmark/*.go --scenario=stream --protocol=grpc --duration=10s --rate=100
+	go run ./cmd/benchmark --scenario=stream --protocol=grpc --duration=10s --rate=100
 
 benchmark-stream-rest:
-	go run cmd/benchmark/*.go --scenario=stream --protocol=rest --duration=10s --rate=100
+	go run ./cmd/benchmark --scenario=stream --protocol=rest --duration=10s --rate=100
 
 # Run database migrations
 migrate: db-up
@@ -67,19 +68,28 @@ migrate: db-up
 		docker-compose exec -T postgres psql -U benchmark -d grpc_benchmark < "$$f"; \
 	done
 
+# Python virtual environment
+PYTHON_VENV := clients/python/venv
+PYTHON := $(PYTHON_VENV)/bin/python
+PIP := $(PYTHON_VENV)/bin/pip
+
+# Create Python venv if it doesn't exist
+$(PYTHON_VENV)/bin/activate:
+	python3 -m venv $(PYTHON_VENV)
+
 # Python client targets
-python-deps:
-	pip install -r clients/python/requirements.txt
+python-deps: $(PYTHON_VENV)/bin/activate
+	$(PIP) install -r clients/python/requirements.txt
 
 python-proto: python-deps
-	cd clients/python && ./generate_proto.sh
+	cd clients/python && PYTHON=$(CURDIR)/$(PYTHON) ./generate_proto.sh
 
 python-benchmark: python-proto
-	python clients/python/grpc_client.py $(ARGS)
+	$(PYTHON) clients/python/grpc_client.py $(ARGS)
 
 # Python SDK benchmark (requires HEDERA_OPERATOR_ID and HEDERA_OPERATOR_KEY env vars)
 python-sdk-benchmark: python-deps
-	python clients/python/sdk_client.py $(ARGS)
+	$(PYTHON) clients/python/sdk_client.py $(ARGS)
 
 # HCS timing fetch (Phase 2d) - fetch timing distribution from Hedera topic
 # Usage: make fetch-hcs-timing TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000
@@ -94,7 +104,7 @@ fetch-hcs-timing:
 TIMING ?= timing.json
 SPEEDUP ?= 1.0
 benchmark-replay:
-	go run cmd/benchmark/*.go --scenario=balance --replay-timing=$(TIMING) --replay-speedup=$(SPEEDUP) $(ARGS)
+	go run ./cmd/benchmark --scenario=balance --replay-timing=$(TIMING) --replay-speedup=$(SPEEDUP) $(ARGS)
 
 # Rust client targets (Phase 2e)
 rust-build:
@@ -126,5 +136,6 @@ clean:
 	docker-compose down -v
 	rm -f pkg/protos/*.pb.go
 	rm -rf clients/python/proto
+	rm -rf clients/python/venv
 	rm -rf clients/rust/target
 	rm -f timing.json

@@ -236,14 +236,22 @@ make dashboard-check
 make db-up && make seed
 
 # Run servers (separate terminals)
-make grpc-server
-make rest-server
+make grpc-server   # :50051
+make rest-server   # :8080
 
-# Run a benchmark
-make benchmark ARGS="--scenario=balance --protocol=grpc --concurrency=50 --duration=60s"
-
-# Verify
+# Verify servers are running
 curl http://localhost:8080/health
 curl http://localhost:8080/api/v1/accounts/0.0.100000/balance
 grpcurl -plaintext localhost:50051 list
+
+# Run benchmarks (Go, Python, Rust)
+make go-benchmark ARGS="--scenario=balance --protocol=grpc --concurrency=10 --duration=10s"
+make python-benchmark ARGS="--scenario=balance --duration=10s"
+make rust-benchmark ARGS="--scenario=balance --protocol=grpc --duration=10s"
+
+# Check dashboard and API
+open http://localhost:8080/
+curl http://localhost:8080/api/v1/results
+make dashboard-check
+make api-check
 ```

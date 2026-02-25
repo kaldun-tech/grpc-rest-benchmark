@@ -15,18 +15,29 @@ make proto
 # Seed PostgreSQL database with test data
 make seed
 
-# Run benchmarks
-make benchmark
+# Start servers
+make grpc-server   # :50051
+make rest-server   # :8080
 
-# Clean up (stop containers, remove generated protobuf code)
+# Run benchmarks (Go, Python, Rust)
+make go-benchmark ARGS="--scenario=balance --protocol=grpc --duration=10s"
+make python-benchmark ARGS="--scenario=balance --duration=10s"
+make rust-benchmark ARGS="--scenario=balance --protocol=grpc --duration=10s"
+
+# Run tests
+make test
+
+# Clean up (stop containers, remove generated protobuf code, venvs)
 make clean
 ```
 
 ## Prerequisites
 
-- Go (with modules)
+- Go 1.21+ (with modules)
 - Protocol Buffer compiler (`protoc`) with Go plugins (`protoc-gen-go`, `protoc-gen-go-grpc`)
 - Docker and Docker Compose (for PostgreSQL)
+- Python 3.12+ (optional, for Python benchmarks - venv auto-created)
+- Rust/Cargo (optional, for Rust benchmarks)
 
 ## Architecture
 
@@ -34,11 +45,15 @@ make clean
 cmd/
   grpc-server/main.go    # gRPC server on :50051
   rest-server/main.go    # REST server on :8080
-  benchmark/main.go      # CLI benchmark runner
+  benchmark/main.go      # Go benchmark client (CLI runner)
 pkg/
   db/                    # PostgreSQL client (accounts, transactions, benchmark results)
   protos/                # Proto definitions and generated Go code
-migrations/001_init.sql  # Schema: accounts, transactions, benchmark tables
+clients/
+  python/                # Python gRPC + SDK benchmark clients
+  rust/                  # Rust benchmark client (tonic + reqwest)
+web/                     # Dashboard (index.html, dashboard.js, style.css)
+migrations/              # Database schema (001-004)
 scripts/seed_data.sql    # 10K accounts, 100K transactions
 docker-compose.yml       # PostgreSQL 16
 ```

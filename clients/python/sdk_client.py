@@ -17,6 +17,7 @@ want to quantify. Network latency will dominate, but p50/p99 spread shows SDK ov
 import argparse
 import os
 import random
+import re
 import signal
 import sys
 import time
@@ -28,6 +29,22 @@ from threading import Event, Lock
 from typing import Optional
 
 from dotenv import load_dotenv
+
+
+def parse_duration(value: str) -> int:
+    """Parse a duration string (e.g., '10s', '1m', '30') into seconds."""
+    value = value.strip()
+    # Try plain integer first
+    if value.isdigit():
+        return int(value)
+    # Match duration patterns like 10s, 1m, 2h
+    match = re.match(r'^(\d+)(s|m|h)?$', value.lower())
+    if not match:
+        raise argparse.ArgumentTypeError(f"Invalid duration: {value} (use e.g., 10, 10s, 1m)")
+    num = int(match.group(1))
+    unit = match.group(2) or 's'
+    multipliers = {'s': 1, 'm': 60, 'h': 3600}
+    return num * multipliers[unit]
 
 from database import Database, DBConfig
 from resources import ResourceMonitor, ResourceStats
@@ -354,8 +371,8 @@ Example:
                         help="Hedera network to connect to")
     parser.add_argument("--concurrency", type=int, default=5,
                         help="Number of parallel workers (default: 5, keep low to avoid rate limits)")
-    parser.add_argument("--duration", type=int, default=30,
-                        help="Test duration in seconds")
+    parser.add_argument("--duration", type=parse_duration, default=30,
+                        help="Test duration (e.g., 30, 30s, 1m)")
     parser.add_argument("--account-count", type=int, default=100,
                         help="Number of accounts to query (spread around operator ID)")
 

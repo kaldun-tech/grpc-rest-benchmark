@@ -6,6 +6,7 @@ Implements the same scenarios as the Go benchmark runner.
 
 import argparse
 import random
+import re
 import signal
 import sys
 import time
@@ -16,6 +17,22 @@ from threading import Event, Lock
 from typing import Optional
 
 import grpc
+
+
+def parse_duration(value: str) -> int:
+    """Parse a duration string (e.g., '10s', '1m', '30') into seconds."""
+    value = value.strip()
+    # Try plain integer first
+    if value.isdigit():
+        return int(value)
+    # Match duration patterns like 10s, 1m, 2h
+    match = re.match(r'^(\d+)(s|m|h)?$', value.lower())
+    if not match:
+        raise argparse.ArgumentTypeError(f"Invalid duration: {value} (use e.g., 10, 10s, 1m)")
+    num = int(match.group(1))
+    unit = match.group(2) or 's'
+    multipliers = {'s': 1, 'm': 60, 'h': 3600}
+    return num * multipliers[unit]
 
 # Generated proto imports (run generate_proto.sh first)
 from proto import benchmark_pb2, benchmark_pb2_grpc
@@ -331,8 +348,8 @@ def main():
                         help="Benchmark scenario")
     parser.add_argument("--concurrency", type=int, default=10,
                         help="Number of parallel workers")
-    parser.add_argument("--duration", type=int, default=30,
-                        help="Test duration in seconds")
+    parser.add_argument("--duration", type=parse_duration, default=30,
+                        help="Test duration (e.g., 30, 30s, 1m)")
     parser.add_argument("--rate", type=int, default=0,
                         help="Events per second for streaming (0 = unlimited)")
     parser.add_argument("--grpc-addr", default="localhost:50051",

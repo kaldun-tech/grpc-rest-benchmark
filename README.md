@@ -14,19 +14,32 @@ Built in Go with a PostgreSQL backend to isolate transport layer performance fro
 
 Both protocols hit DB connection pool saturation around 10K req/s.
 
+## Prerequisites
+
+- **Go 1.21+** with modules enabled
+- **Docker** and Docker Compose
+- **Protocol Buffers** compiler (`protoc`) with Go plugins (`protoc-gen-go`, `protoc-gen-go-grpc`)
+- **Python 3.12+** (optional, for Python benchmarks)
+- **Rust/Cargo** (optional, for Rust benchmarks)
+
 ## Quick Start
 
 ```bash
-# Prerequisites: Go 1.21+, Docker, protoc with Go plugins
-
 # Generate protobuf code
 make proto
 
-# Start PostgreSQL and seed test data
+# Start PostgreSQL and seed test data (10K accounts, 100K transactions)
 make seed
 
-# Run benchmarks
-make benchmark
+# Start servers (in separate terminals)
+make grpc-server   # starts gRPC server on :50051
+make rest-server   # starts REST server on :8080
+
+# Run a benchmark
+make benchmark ARGS="--scenario=balance --protocol=grpc --concurrency=10 --duration=10s"
+
+# View results in dashboard
+open http://localhost:8080/
 
 # Cleanup
 make clean
@@ -63,6 +76,65 @@ Server-side streaming pattern simulating real-time transaction event feeds.
 **gRPC:** `TransactionService.StreamTransactions(since, rate_limit) → stream Transaction`
 
 **REST:** `GET /transactions/stream?since=...` (Server-Sent Events)
+
+## Running Benchmarks
+
+Three benchmark clients are available: Go, Python, and Rust. All store results in PostgreSQL and can be visualized in the dashboard.
+
+### Go Client (default)
+
+```bash
+# Balance queries
+make go-benchmark ARGS="--scenario=balance --protocol=grpc --concurrency=50 --duration=30s"
+make go-benchmark ARGS="--scenario=balance --protocol=rest --concurrency=50 --duration=30s"
+
+# Transaction streaming
+make go-benchmark ARGS="--scenario=stream --protocol=grpc --rate=100 --duration=30s"
+make go-benchmark ARGS="--scenario=stream --protocol=rest --rate=100 --duration=30s"
+```
+
+### Python Client
+
+The Makefile automatically creates a virtual environment at `clients/python/venv/`.
+
+```bash
+# Balance queries (gRPC only)
+make python-benchmark ARGS="--scenario=balance --concurrency=10 --duration=30s"
+
+# Transaction streaming
+make python-benchmark ARGS="--scenario=stream --rate=100 --duration=30s"
+```
+
+### Rust Client
+
+```bash
+# Balance queries
+make rust-benchmark ARGS="--scenario=balance --protocol=grpc --duration=30s"
+make rust-benchmark ARGS="--scenario=balance --protocol=rest --duration=30s"
+
+# Transaction streaming (gRPC only)
+make rust-benchmark ARGS="--scenario=stream --protocol=grpc --rate=100 --duration=30s"
+```
+
+### HCS Timing Replay
+
+Replay real Hedera Consensus Service timing patterns for realistic workload simulation:
+
+```bash
+# Fetch timing data from a public HCS topic
+make fetch-hcs-timing TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000
+
+# Run benchmark with timing replay (10x speedup)
+make benchmark-replay TIMING=timing.json SPEEDUP=10 ARGS="--protocol=grpc --concurrency=10"
+```
+
+### Running Tests
+
+```bash
+make test              # Run all tests
+make test-db           # Database integration tests only
+make test-benchmark    # Benchmark unit tests only
+```
 
 ## Project Structure
 
