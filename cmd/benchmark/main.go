@@ -28,6 +28,12 @@ func main() {
 	replayMode := flag.String("replay-mode", "sample", "Replay mode: sequential | sample")
 	replaySpeedup := flag.Float64("replay-speedup", 1.0, "Speedup factor for replay (1.0 = real-time, 10.0 = 10x faster)")
 
+	// HCS fetch flags (hcsreplay integration)
+	hcsTopic := flag.String("hcs-topic", "", "HCS topic ID to fetch timing from (e.g., 0.0.120438)")
+	hcsNetwork := flag.String("hcs-network", "mainnet", "Hedera network: mainnet | testnet | previewnet")
+	hcsLimit := flag.Int("hcs-limit", 1000, "Maximum number of HCS messages to fetch for timing")
+	hcsSavePath := flag.String("hcs-save", "", "Path to save fetched HCS timing data for reuse")
+
 	// Database flags
 	dbHost := flag.String("db-host", "localhost", "PostgreSQL host")
 	dbPort := flag.Int("db-port", 5432, "PostgreSQL port")
@@ -114,8 +120,35 @@ func main() {
 	// Create runner
 	runner := NewRunner(client, accountIDs, *concurrency, *rate)
 
-	// Load timing replay if specified
-	if *replayTiming != "" {
+	// Load timing replay: either from file or by fetching from HCS topic
+	if *hcsTopic != "" {
+		// Fetch timing data directly from HCS topic
+		log.Printf("Fetching timing data from HCS topic %s on %s...", *hcsTopic, *hcsNetwork)
+		fetchCtx, fetchCancel := context.WithTimeout(ctx, 5*time.Minute)
+		timingData, err := FetchTimingData(fetchCtx, *hcsTopic, *hcsNetwork, *hcsLimit, func(count int) {
+			log.Printf("  Fetched %d messages...", count)
+		})
+		fetchCancel()
+		if err != nil {
+			log.Fatalf("Failed to fetch HCS timing data: %v", err)
+		}
+		log.Printf("Fetched %d messages from topic %s", timingData.MessageCount, *hcsTopic)
+
+		// Optionally save for reuse
+		if *hcsSavePath != "" {
+			if err := SaveTimingData(*hcsSavePath, timingData); err != nil {
+				log.Printf("Warning: failed to save timing data: %v", err)
+			} else {
+				log.Printf("Saved timing data to %s", *hcsSavePath)
+			}
+		}
+
+		tr := NewTimingReplay(timingData, *replayMode, *replaySpeedup)
+		runner.SetTimingReplay(tr)
+		tr.PrintSummary()
+		fmt.Println()
+	} else if *replayTiming != "" {
+		// Load timing data from file
 		timingData, err := LoadTimingData(*replayTiming)
 		if err != nil {
 			log.Fatalf("Failed to load timing data: %v", err)
@@ -145,7 +178,7 @@ func main() {
 	if *scenario == "stream" && *rate > 0 {
 		fmt.Printf(" | Rate limit: %d events/s", *rate)
 	}
-	if *replayTiming != "" {
+	if *replayTiming != "" || *hcsTopic != "" {
 		fmt.Printf(" | Replay: %s (%.1fx)", *replayMode, *replaySpeedup)
 	}
 	fmt.Println()

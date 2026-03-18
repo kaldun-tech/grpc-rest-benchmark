@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	port     = flag.Int("port", 50051, "gRPC server port")
-	dbHost   = flag.String("db-host", "localhost", "PostgreSQL host")
-	dbPort   = flag.Int("db-port", 5432, "PostgreSQL port")
-	dbUser   = flag.String("db-user", "benchmark", "PostgreSQL user")
-	dbPass   = flag.String("db-pass", "benchmark_pass", "PostgreSQL password")
-	dbName   = flag.String("db-name", "grpc_benchmark", "PostgreSQL database")
+	port   = flag.Int("port", 50051, "gRPC server port")
+	dbHost = flag.String("db-host", "localhost", "PostgreSQL host")
+	dbPort = flag.Int("db-port", 5432, "PostgreSQL port")
+	dbUser = flag.String("db-user", "benchmark", "PostgreSQL user")
+	dbPass = flag.String("db-pass", "benchmark_pass", "PostgreSQL password")
+	dbName = flag.String("db-name", "grpc_benchmark", "PostgreSQL database")
 )
 
 func main() {
@@ -107,9 +107,9 @@ func (s *BalanceService) GetBalance(ctx context.Context, req *protos.BalanceRequ
 	}
 
 	return &protos.BalanceResponse{
-		AccountId:     account.AccountID,
+		AccountId:      account.AccountID,
 		BalanceTinybar: account.Balance,
-		Timestamp:     account.UpdatedAt.Format(time.RFC3339),
+		Timestamp:      account.UpdatedAt.Format(time.RFC3339),
 	}, nil
 }
 
@@ -123,9 +123,9 @@ func (s *BalanceService) GetBalances(ctx context.Context, req *protos.BatchBalan
 	balances := make([]*protos.BalanceResponse, len(accounts))
 	for i, acc := range accounts {
 		balances[i] = &protos.BalanceResponse{
-			AccountId:     acc.AccountID,
+			AccountId:      acc.AccountID,
 			BalanceTinybar: acc.Balance,
-			Timestamp:     acc.UpdatedAt.Format(time.RFC3339),
+			Timestamp:      acc.UpdatedAt.Format(time.RFC3339),
 		}
 	}
 

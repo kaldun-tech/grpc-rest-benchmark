@@ -5,10 +5,9 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use deadpool_postgres::{Config as PoolConfig, Pool, Runtime};
 use futures::stream::StreamExt;
+use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
-use rand::rngs::StdRng;
-use serde::Deserialize;
 use sysinfo::System;
 use tokio::sync::mpsc;
 use tokio::time::interval;
@@ -89,14 +88,6 @@ struct Results {
     end_time: Option<Instant>,
     cpu_samples: Vec<f32>,
     mem_samples: Vec<u64>,
-}
-
-#[derive(Debug, Deserialize)]
-struct BalanceResponse {
-    #[allow(dead_code)]
-    account_id: String,
-    #[allow(dead_code)]
-    balance_tinybar: i64,
 }
 
 impl Results {
@@ -214,13 +205,22 @@ impl Results {
 fn parse_duration(s: &str) -> Result<Duration, String> {
     let s = s.trim();
     if s.ends_with("ms") {
-        let val: u64 = s.trim_end_matches("ms").parse().map_err(|e| format!("{}", e))?;
+        let val: u64 = s
+            .trim_end_matches("ms")
+            .parse()
+            .map_err(|e| format!("{}", e))?;
         Ok(Duration::from_millis(val))
     } else if s.ends_with('s') {
-        let val: u64 = s.trim_end_matches('s').parse().map_err(|e| format!("{}", e))?;
+        let val: u64 = s
+            .trim_end_matches('s')
+            .parse()
+            .map_err(|e| format!("{}", e))?;
         Ok(Duration::from_secs(val))
     } else if s.ends_with('m') {
-        let val: u64 = s.trim_end_matches('m').parse().map_err(|e| format!("{}", e))?;
+        let val: u64 = s
+            .trim_end_matches('m')
+            .parse()
+            .map_err(|e| format!("{}", e))?;
         Ok(Duration::from_secs(val * 60))
     } else {
         Err(format!("Invalid duration format: {}", s))
@@ -254,7 +254,10 @@ fn create_db_pool(
 }
 
 /// Connect to database with retry logic.
-async fn connect_with_retry(pool: &Pool, max_retries: u32) -> Result<deadpool_postgres::Object, Box<dyn std::error::Error>> {
+async fn connect_with_retry(
+    pool: &Pool,
+    max_retries: u32,
+) -> Result<deadpool_postgres::Object, Box<dyn std::error::Error>> {
     let mut last_err = None;
     let mut retry_interval = Duration::from_millis(100);
 
@@ -272,15 +275,17 @@ async fn connect_with_retry(pool: &Pool, max_retries: u32) -> Result<deadpool_po
         }
     }
 
-    Err(format!("Failed to connect after {} retries: {:?}", max_retries, last_err).into())
+    Err(format!(
+        "Failed to connect after {} retries: {:?}",
+        max_retries, last_err
+    )
+    .into())
 }
 
 async fn fetch_account_ids(pool: &Pool) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     let client = connect_with_retry(pool, 3).await?;
 
-    let rows = client
-        .query("SELECT account_id FROM accounts", &[])
-        .await?;
+    let rows = client.query("SELECT account_id FROM accounts", &[]).await?;
 
     let account_ids: Vec<String> = rows.iter().map(|row| row.get(0)).collect();
     Ok(account_ids)
@@ -327,14 +332,17 @@ async fn store_results(
     let now = chrono::Utc::now().naive_utc();
     for chunk in results.samples.chunks(1000) {
         let mut query = String::from(
-            "INSERT INTO benchmark_samples (run_id, latency_ms, success, timestamp) VALUES "
+            "INSERT INTO benchmark_samples (run_id, latency_ms, success, timestamp) VALUES ",
         );
         let mut values: Vec<String> = Vec::new();
         for (i, _sample) in chunk.iter().enumerate() {
             let idx = i * 4;
             values.push(format!(
                 "(${}, ${}, ${}, ${})",
-                idx + 1, idx + 2, idx + 3, idx + 4
+                idx + 1,
+                idx + 2,
+                idx + 3,
+                idx + 4
             ));
         }
         query.push_str(&values.join(", "));
@@ -424,9 +432,7 @@ async fn run_grpc_balance(
                 let account_id = account_ids.choose(&mut rng).unwrap().clone();
                 let start = Instant::now();
 
-                let result = client
-                    .get_balance(BalanceRequest { account_id })
-                    .await;
+                let result = client.get_balance(BalanceRequest { account_id }).await;
 
                 let latency = start.elapsed();
                 let success = result.is_ok();
@@ -540,12 +546,7 @@ async fn run_rest_balance(
     results
 }
 
-async fn run_grpc_stream(
-    addr: &str,
-    concurrency: usize,
-    duration: Duration,
-    rate: i32,
-) -> Results {
+async fn run_grpc_stream(addr: &str, concurrency: usize, duration: Duration, rate: i32) -> Results {
     let mut results = Results::default();
     let (tx, mut rx) = mpsc::channel::<Sample>(10000);
     let running = Arc::new(AtomicBool::new(true));
@@ -619,7 +620,12 @@ async fn run_grpc_stream(
                         let latency = now.duration_since(last_event);
                         last_event = now;
 
-                        let _ = tx.send(Sample { latency, success: true }).await;
+                        let _ = tx
+                            .send(Sample {
+                                latency,
+                                success: true,
+                            })
+                            .await;
                     }
                     Some(Err(e)) => {
                         eprintln!("Stream error: {}", e);
@@ -655,18 +661,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Validate arguments
     if args.scenario != "balance" && args.scenario != "stream" {
-        eprintln!("Invalid scenario: {} (must be 'balance' or 'stream')", args.scenario);
+        eprintln!(
+            "Invalid scenario: {} (must be 'balance' or 'stream')",
+            args.scenario
+        );
         std::process::exit(1);
     }
     if args.protocol != "grpc" && args.protocol != "rest" {
-        eprintln!("Invalid protocol: {} (must be 'grpc' or 'rest')", args.protocol);
+        eprintln!(
+            "Invalid protocol: {} (must be 'grpc' or 'rest')",
+            args.protocol
+        );
         std::process::exit(1);
     }
 
     let duration = parse_duration(&args.duration)?;
 
     // Create database connection pool
-    println!("Connecting to database {}@{}:{}...", args.db_name, args.db_host, args.db_port);
+    println!(
+        "Connecting to database {}@{}:{}...",
+        args.db_name, args.db_host, args.db_port
+    );
     let pool = create_db_pool(
         &args.db_host,
         args.db_port,
@@ -690,7 +705,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "\nStarting {} benchmark ({} protocol)",
         args.scenario, args.protocol
     );
-    println!("Concurrency: {} | Duration: {:?}", args.concurrency, duration);
+    println!(
+        "Concurrency: {} | Duration: {:?}",
+        args.concurrency, duration
+    );
 
     // Run benchmark
     let results = match (args.scenario.as_str(), args.protocol.as_str()) {

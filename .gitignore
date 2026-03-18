@@ -52,3 +52,4 @@ clients/python/proto/
 
 # Rust
 clients/rust/target/
+timing.json

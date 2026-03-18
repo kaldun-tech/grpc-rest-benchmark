@@ -6,18 +6,20 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/kaldun-tech/hiero-hcs-replay"
 )
 
 func TestLoadTimingData(t *testing.T) {
 	// Create a temporary timing file
-	data := TimingData{
+	data := hcsreplay.TimingData{
 		TopicID:          "0.0.123456",
 		Network:          "testnet",
 		MessageCount:     5,
 		TimeSpanSeconds:  10.0,
 		AvgRatePerSecond: 0.5,
 		InterArrivalMs:   []float64{100, 200, 150, 300, 250},
-		Stats: TimingStats{
+		Stats: hcsreplay.Stats{
 			MinMs: 100,
 			MaxMs: 300,
 			AvgMs: 200,
@@ -81,7 +83,7 @@ func TestLoadTimingData_EmptyInterArrivals(t *testing.T) {
 	tmpDir := t.TempDir()
 	tmpFile := filepath.Join(tmpDir, "empty.json")
 
-	data := TimingData{
+	data := hcsreplay.TimingData{
 		TopicID:        "0.0.123",
 		InterArrivalMs: []float64{}, // Empty
 	}
@@ -97,43 +99,83 @@ func TestLoadTimingData_EmptyInterArrivals(t *testing.T) {
 }
 
 func TestNewTimingReplay(t *testing.T) {
-	data := &TimingData{
-		InterArrivalMs: []float64{100, 200, 300},
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
 	tr := NewTimingReplay(data, "sample", 1.0)
 	if tr == nil {
 		t.Fatal("NewTimingReplay() returned nil")
 	}
-	if tr.mode != "sample" {
-		t.Errorf("mode = %q, want %q", tr.mode, "sample")
-	}
-	if tr.speedup != 1.0 {
-		t.Errorf("speedup = %f, want 1.0", tr.speedup)
+
+	// Verify effective rate calculation
+	effectiveRate := tr.EffectiveRate()
+	if effectiveRate != 3.0 {
+		t.Errorf("EffectiveRate() = %f, want 3.0", effectiveRate)
 	}
 }
 
 func TestNewTimingReplay_InvalidSpeedup(t *testing.T) {
-	data := &TimingData{
-		InterArrivalMs: []float64{100, 200, 300},
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
 	// Zero speedup should default to 1.0
 	tr := NewTimingReplay(data, "sample", 0)
-	if tr.speedup != 1.0 {
-		t.Errorf("speedup = %f, want 1.0 (default)", tr.speedup)
+	// Effective rate with speedup 1.0 should equal the original rate
+	if tr.EffectiveRate() != 3.0 {
+		t.Errorf("EffectiveRate() = %f, want 3.0 (default speedup 1.0)", tr.EffectiveRate())
 	}
 
 	// Negative speedup should default to 1.0
 	tr = NewTimingReplay(data, "sample", -5)
-	if tr.speedup != 1.0 {
-		t.Errorf("speedup = %f, want 1.0 (default)", tr.speedup)
+	if tr.EffectiveRate() != 3.0 {
+		t.Errorf("EffectiveRate() = %f, want 3.0 (default speedup 1.0)", tr.EffectiveRate())
 	}
 }
 
 func TestTimingReplay_NextDelay_Sequential(t *testing.T) {
-	data := &TimingData{
-		InterArrivalMs: []float64{100, 200, 300},
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
 	tr := NewTimingReplay(data, "sequential", 1.0)
@@ -155,8 +197,21 @@ func TestTimingReplay_NextDelay_Sequential(t *testing.T) {
 }
 
 func TestTimingReplay_NextDelay_Sample(t *testing.T) {
-	data := &TimingData{
-		InterArrivalMs: []float64{100, 200, 300},
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
 	tr := NewTimingReplay(data, "sample", 1.0)
@@ -177,8 +232,21 @@ func TestTimingReplay_NextDelay_Sample(t *testing.T) {
 }
 
 func TestTimingReplay_NextDelay_Speedup(t *testing.T) {
-	data := &TimingData{
-		InterArrivalMs: []float64{100, 200, 300},
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
 	// 2x speedup means delays should be halved
@@ -236,39 +304,31 @@ func TestGenerateSyntheticTiming(t *testing.T) {
 	}
 }
 
-func TestHelperFunctions(t *testing.T) {
-	// Test average
-	vals := []float64{10, 20, 30, 40, 50}
-	avg := average(vals)
-	if avg != 30.0 {
-		t.Errorf("average() = %f, want 30.0", avg)
+func TestTimingReplay_Data(t *testing.T) {
+	data := &hcsreplay.TimingData{
+		TopicID:          "0.0.123",
+		Network:          "testnet",
+		MessageCount:     3,
+		TimeSpanSeconds:  1.0,
+		AvgRatePerSecond: 3.0,
+		InterArrivalMs:   []float64{100, 200, 300},
+		Stats: hcsreplay.Stats{
+			MinMs: 100,
+			MaxMs: 300,
+			AvgMs: 200,
+			P50Ms: 200,
+			P90Ms: 300,
+			P99Ms: 300,
+		},
 	}
 
-	// Test average empty
-	if avg := average([]float64{}); avg != 0 {
-		t.Errorf("average([]) = %f, want 0", avg)
-	}
+	tr := NewTimingReplay(data, "sample", 1.0)
+	retrievedData := tr.Data()
 
-	// Test sum
-	s := sum(vals)
-	if s != 150.0 {
-		t.Errorf("sum() = %f, want 150.0", s)
+	if retrievedData.TopicID != data.TopicID {
+		t.Errorf("Data().TopicID = %q, want %q", retrievedData.TopicID, data.TopicID)
 	}
-
-	// Test percentile
-	sorted := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-	p50 := percentile(sorted, 0.50)
-	if p50 != 6.0 { // Index 5 at 50%
-		t.Errorf("percentile(50) = %f, want 6.0", p50)
-	}
-
-	p90 := percentile(sorted, 0.90)
-	if p90 != 10.0 { // Index 9 at 90%
-		t.Errorf("percentile(90) = %f, want 10.0", p90)
-	}
-
-	// Test percentile empty
-	if p := percentile([]float64{}, 0.50); p != 0 {
-		t.Errorf("percentile([]) = %f, want 0", p)
+	if retrievedData.MessageCount != data.MessageCount {
+		t.Errorf("Data().MessageCount = %d, want %d", retrievedData.MessageCount, data.MessageCount)
 	}
 }

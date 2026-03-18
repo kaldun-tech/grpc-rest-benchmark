@@ -118,15 +118,37 @@ make rust-benchmark ARGS="--scenario=stream --protocol=grpc --rate=100 --duratio
 
 ### HCS Timing Replay
 
-Replay real Hedera Consensus Service timing patterns for realistic workload simulation:
+Replay real Hedera Consensus Service timing patterns for realistic workload simulation. Uses the [hiero-hcs-replay](https://github.com/kaldun-tech/hiero-hcs-replay) library.
+
+**Option 1: Live fetch and benchmark in one step**
 
 ```bash
-# Fetch timing data from a public HCS topic
+# Fetch timing from HCS topic and immediately run benchmark
+make benchmark-hcs-live TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000 \
+    SPEEDUP=10 ARGS="--protocol=grpc --concurrency=10 --duration=30s"
+```
+
+**Option 2: Fetch once, replay multiple times**
+
+```bash
+# Fetch timing data from a public HCS topic (saves to timing.json)
 make fetch-hcs-timing TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000
 
-# Run benchmark with timing replay (10x speedup)
+# Run benchmark with saved timing data (10x speedup)
 make benchmark-replay TIMING=timing.json SPEEDUP=10 ARGS="--protocol=grpc --concurrency=10"
 ```
+
+**CLI flags for HCS replay:**
+
+| Flag | Description |
+|------|-------------|
+| `--hcs-topic` | HCS topic ID to fetch timing from (e.g., `0.0.120438`) |
+| `--hcs-network` | Hedera network: `mainnet`, `testnet`, `previewnet` |
+| `--hcs-limit` | Max messages to fetch (default: 1000) |
+| `--hcs-save` | Path to save fetched timing data for reuse |
+| `--replay-timing` | Path to pre-fetched timing JSON file |
+| `--replay-mode` | `sequential` (exact order) or `sample` (random) |
+| `--replay-speedup` | Speed multiplier (1.0 = real-time, 10.0 = 10x faster) |
 
 ### Running Tests
 

@@ -20,12 +20,12 @@ import (
 )
 
 var (
-	port     = flag.Int("port", 8080, "REST server port")
-	dbHost   = flag.String("db-host", "localhost", "PostgreSQL host")
-	dbPort   = flag.Int("db-port", 5432, "PostgreSQL port")
-	dbUser   = flag.String("db-user", "benchmark", "PostgreSQL user")
-	dbPass   = flag.String("db-pass", "benchmark_pass", "PostgreSQL password")
-	dbName   = flag.String("db-name", "grpc_benchmark", "PostgreSQL database")
+	port   = flag.Int("port", 8080, "REST server port")
+	dbHost = flag.String("db-host", "localhost", "PostgreSQL host")
+	dbPort = flag.Int("db-port", 5432, "PostgreSQL port")
+	dbUser = flag.String("db-user", "benchmark", "PostgreSQL user")
+	dbPass = flag.String("db-pass", "benchmark_pass", "PostgreSQL password")
+	dbName = flag.String("db-name", "grpc_benchmark", "PostgreSQL database")
 )
 
 // Server holds the REST server state.

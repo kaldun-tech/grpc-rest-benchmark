@@ -4,10 +4,13 @@ go 1.26.0
 
 require (
 	github.com/jackc/pgx/v5 v5.8.0
+	github.com/kaldun-tech/hiero-hcs-replay v0.1.0
 	github.com/shirou/gopsutil/v4 v4.26.1
 	google.golang.org/grpc v1.79.1
 	google.golang.org/protobuf v1.36.11
 )
+
+replace github.com/kaldun-tech/hiero-hcs-replay => ../hiero-hcs-replay
 
 require (
 	github.com/ebitengine/purego v0.9.1 // indirect

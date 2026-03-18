@@ -8,9 +8,9 @@ import (
 
 // Account represents an account balance record.
 type Account struct {
-	AccountID   string
-	Balance     int64
-	UpdatedAt   time.Time
+	AccountID string
+	Balance   int64
+	UpdatedAt time.Time
 }
 
 // GetBalance retrieves the balance for a single account.

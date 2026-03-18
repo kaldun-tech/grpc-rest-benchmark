@@ -45,7 +45,9 @@
       "Bash(cargo build:*)",
       "Bash(./clients/rust/target/release/benchmark_client:*)",
       "Bash(go test:*)",
-      "Bash(make test:*)"
+      "Bash(make test:*)",
+      "Bash(cargo fmt:*)",
+      "Bash(go fmt:*)"
     ]
   }
 }

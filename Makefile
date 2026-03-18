@@ -93,6 +93,7 @@ python-sdk-benchmark: python-deps
 
 # HCS timing fetch (Phase 2d) - fetch timing distribution from Hedera topic
 # Usage: make fetch-hcs-timing TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000
+# Note: This uses the Python script. For Go-based fetching, use benchmark-hcs-live.
 TOPIC ?= 0.0.120438
 NETWORK ?= mainnet
 LIMIT ?= 1000
@@ -105,6 +106,13 @@ TIMING ?= timing.json
 SPEEDUP ?= 1.0
 benchmark-replay:
 	go run ./cmd/benchmark --scenario=balance --replay-timing=$(TIMING) --replay-speedup=$(SPEEDUP) $(ARGS)
+
+# Run benchmark with live HCS fetch (hcsreplay integration)
+# Fetches timing data directly from an HCS topic and runs benchmark with it
+# Usage: make benchmark-hcs-live TOPIC=0.0.120438 NETWORK=mainnet LIMIT=1000 ARGS="--protocol=grpc"
+benchmark-hcs-live:
+	go run ./cmd/benchmark --scenario=balance --hcs-topic=$(TOPIC) --hcs-network=$(NETWORK) \
+		--hcs-limit=$(LIMIT) --hcs-save=timing.json --replay-speedup=$(SPEEDUP) $(ARGS)
 
 # Rust client targets (Phase 2e)
 rust-build:
